@@ -10,7 +10,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/social-client.test.js"
+    "test": "node --test test/social-client.test.js test/chat-config.test.js test/widget-api.test.js",
+    "test:browser": "node test/browser/server.js"
   },
   "engines": {
     "node": ">=22"
