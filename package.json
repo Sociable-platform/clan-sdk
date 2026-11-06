@@ -1,0 +1,18 @@
+{
+  "name": "clan-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plain JavaScript Social client for the clan widget SDK",
+  "type": "module",
+  "exports": "./src/index.js",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/social-client.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
