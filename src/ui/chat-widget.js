@@ -1,41 +1,36 @@
 import { normalizeChatConfig } from '../config/chat.js';
+import { createChatRenderer } from './chat-renderer.js';
+import { createChatState } from './chat-state.js';
+import { assertContainerAvailable, reserveContainer, releaseContainer } from './mount-registry.js';
 
 // Shared across SDK instances, but keyed by actual containers (never player data).
-const activeMounts = new WeakMap();
 
-/** Mount a disconnected visual shell. No tokens, HTTP, timers or sockets. */
+/** SDK controller/lifecycle. The replaceable visual component never owns transport. */
+export function assertChatContainerAvailable(container) {
+  assertContainerAvailable(container);
+}
+
 export function mountChatWidget({ container, config } = {}) {
-  const view = container?.ownerDocument?.defaultView;
-  if (!view || !(container instanceof view.HTMLElement)) {
-    throw new TypeError('mountChatWidget requires an HTML element container.');
-  }
-  if (activeMounts.has(container)) {
-    throw new Error('This container already has an active SDK widget. Destroy it before mounting again.');
-  }
-  const normalized = normalizeChatConfig(config);
+  assertChatContainerAvailable(container);
+  let normalized = normalizeChatConfig(config);
+  let state = createChatState();
+  let destroyed = false;
   const doc = container.ownerDocument;
   const host = doc.createElement('div');
   host.setAttribute('data-clan-sdk-widget', 'chat');
   const shadow = host.attachShadow({ mode: 'open' });
-  const style = doc.createElement('style');
-  style.textContent = `
-    *, *::before, *::after { box-sizing: border-box; }
-    section {
-      width: 100%; height: 100%; overflow: auto;
-      border: 1px solid var(--clan-primary); border-radius: var(--clan-radius);
-      background: var(--clan-background); color: var(--clan-text);
-      padding: 16px; font: 14px/1.5 system-ui, sans-serif;
-    }
-    h2 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
-    p { margin: 0; }
-  `;
-  const region = doc.createElement('section');
-  region.setAttribute('role', 'region');
-  const heading = doc.createElement('h2');
-  const status = doc.createElement('p');
-  status.textContent = 'Chat is not connected.';
-  region.append(heading, status);
-  shadow.append(style, region);
+  const renderer = createChatRenderer(shadow, {
+    onDraftChange(value) {
+      if (destroyed) return;
+      state = createChatState(value);
+      renderer.update({ config: normalized, state });
+    },
+    onSend() {
+      if (destroyed) return;
+      // Transport is unavailable. Keep the draft; never synthesize messages or success.
+      renderer.update({ config: normalized, state });
+    },
+  });
 
   // Inline important host rules resist ordinary host-page rules, including !important.
   // Ancestor transforms/containment still obey normal browser fixed-position rules.
@@ -62,28 +57,27 @@ export function mountChatWidget({ container, config } = {}) {
     set('--clan-background', next.theme.backgroundColor);
     set('--clan-text', next.theme.textColor);
     set('--clan-radius', `${next.theme.borderRadius}px`);
-    const chats = next.tabs.find(tab => tab.id === 'chats');
-    heading.textContent = chats.label;
-    region.setAttribute('aria-label', chats.label);
+    renderer.update({ config: next, state });
   }
 
   apply(normalized);
-  let destroyed = false;
   const handle = {
     updateConfig(nextConfig) {
       if (destroyed) throw new Error('Cannot update a destroyed SDK widget.');
       // Validate the entire replacement before changing a single DOM/style value.
       const next = normalizeChatConfig(nextConfig);
       apply(next);
+      normalized = next;
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      renderer.destroy();
       host.remove();
-      activeMounts.delete(container);
+      releaseContainer(container);
     },
   };
   container.append(host);
-  activeMounts.set(container, handle);
+  reserveContainer(container);
   return handle;
 }

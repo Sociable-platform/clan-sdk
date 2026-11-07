@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Temporary SDK chat preview</title>
+  <style>
+    body { margin: 24px; font: 15px/1.5 system-ui, sans-serif; background: #f4f4f9; color: #171923; }
+    main { max-width: 620px; }
+    textarea { display: block; width: 100%; box-sizing: border-box; min-height: 390px; padding: 12px; font: 13px/1.4 monospace; }
+    button { margin: 12px 6px 0 0; padding: 8px 12px; }
+    :focus-visible { outline: 3px solid #6b46c1; outline-offset: 2px; }
+    .widget-stage { margin-top: 24px; width: min(100%, 420px); }
+    .widget-stage iframe { display: block; width: 100%; height: 560px; box-sizing: border-box; border: 1px solid #aaa; border-radius: 8px; }
+    @media(min-width: 1000px) {
+      body { padding-right: 460px; }
+      .widget-stage { position: fixed; right: 24px; top: 24px; margin: 0; width: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Temporary SDK chat preview</h1>
+    <p>Shared frontend components are pending. Configuration is loaded by the production SDK from a provisional development HTTP endpoint. Chat messaging remains disconnected.</p>
+    <label for="config-url">Provisional development config URL</label>
+    <input id="config-url" value="/__dev__/chat-config?variant=rotate" style="display:block;width:100%;box-sizing:border-box">
+    <button id="mount" type="button" disabled>Mount widget from URL</button>
+    <button id="refresh" type="button" disabled>Refresh config</button>
+    <button id="destroy" type="button" disabled>Destroy / cancel loading</button>
+    <p>Refresh fetches again; the development mock rotates two appearance presets. Change the URL after destroying the widget. No player token is sent to this endpoint.</p>
+    <p id="result" role="status"></p>
+    <details>
+      <summary>Optional JSON editor (local override only)</summary>
+      <label for="config">Debug chat configuration JSON</label>
+      <textarea id="config" spellcheck="false"></textarea>
+      <button id="apply" type="button">Apply local debug config</button>
+      <button id="reset" type="button">Reset debug defaults</button>
+      <p>This editor does not save server configuration. Refresh replaces local overrides with the next HTTP response.</p>
+    </details>
+  </main>
+  <aside class="widget-stage" aria-label="SDK widget preview">
+    <p>Widget viewport. Floating positions apply inside this frame.</p>
+    <iframe id="widget-viewport" title="Chat widget viewport" src="/preview/widget-frame.html"></iframe>
+  </aside>
+  <script type="module" src="/preview/preview.js"></script>
+</body>
+</html>

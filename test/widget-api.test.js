@@ -7,6 +7,8 @@ test('widget API is additive; init/import needs no DOM, token or network', (t) =
   const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected HTTP'); });
   const sdk = init({ socialUrl: 'http://localhost:8082', getPlayerToken: token });
   assert.equal(typeof sdk.mountChatWidget, 'function');
+  assert.equal(typeof sdk.mountChatWidgetFromUrl, 'function');
+  assert.equal(typeof sdk.mountExperience, 'function');
   for (const method of ['listClans', 'createClan', 'joinClan', 'myClan', 'clanMembers']) {
     assert.equal(typeof sdk[method], 'function');
   }

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Discover SDK — mock integration preview</title>
+<style>body{margin:0;padding:24px;background:#0e1019;color:#f4f4f9;font:14px Arial,sans-serif}main{max-width:820px;margin:auto;display:flex;gap:32px;align-items:start}aside{max-width:320px}a{color:#E779AA}#experience{min-width:0;flex:1}#events{overflow-wrap:anywhere}@media(max-width:680px){main{flex-direction:column}body{padding:12px}#experience{width:100%}}</style>
+<main><div id="experience"></div><aside><h1>Discover SDK preview</h1><p><strong>MOCK DATA · provisional HTTP adapter</strong></p>
+<p>Only the player widget is rendered by the SDK. This host page supplies development data, not a live backend.</p>
+<p>Search “error” to test a failed load, or “missing” for an empty result. The full clan is disabled. “Server rejection example” demonstrates a join rejected by the server.</p>
+<p>Create emits internal navigation and a Back handoff; no Create screen or form is implemented. A successful join emits an event and stays on Discover.</p>
+<p>Edit <code>preview/discover/config.json</code> and reload to try configuration changes.</p><p id="events" role="status">No navigation or join events yet.</p><a href="/">Run browser tests</a></aside></main>
+<script type="module" src="./preview.js"></script></html>

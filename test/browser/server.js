@@ -1,19 +1,27 @@
-// Development-only local browser test server. No SDK/backend mock is installed.
+// Development-only server. Its provisional HTTP config mock is never in src.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, relative, extname, sep } from 'node:path';
+import { handleDevConfigRequest } from '../dev-config-endpoint.js';
+import { handleDevDiscoverRequest } from '../dev-discover-endpoint.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const types = { '.html': 'text/html', '.js': 'text/javascript' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
-    const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-    const requested = pathname === '/' ? '/test/browser/index.html' : pathname;
+    const url = new URL(req.url, 'http://localhost');
+    if (handleDevConfigRequest(req, res, url)) return;
+    if (handleDevDiscoverRequest(req, res, url)) return;
+    const pathname = decodeURIComponent(url.pathname);
+    const requested = pathname === '/' ? '/test/browser/index.html'
+      : ['/preview', '/preview/'].includes(pathname) ? '/preview/index.html'
+      : ['/preview/discover', '/preview/discover/'].includes(pathname) ? '/preview/discover/index.html' : pathname;
     const target = resolve(root, `.${requested}`);
     const local = relative(root, target);
     if (req.method !== 'GET' || local.startsWith(`..${sep}`) || local === '..'
-        || !(local.startsWith(`src${sep}`) || local.startsWith(`test${sep}browser${sep}`))) {
+        || !(local.startsWith(`src${sep}`) || local.startsWith(`test${sep}browser${sep}`) || local.startsWith(`preview${sep}`)
+          || local === ['test', 'fixtures', 'config', 'complete-experience-v1.json'].join(sep))) {
       res.writeHead(404).end();
       return;
     }
@@ -26,5 +34,6 @@ const server = createServer(async (req, res) => {
 });
 server.listen(Number(process.env.BROWSER_TEST_PORT ?? 5174), '127.0.0.1', () => {
   console.log(`Browser tests: http://127.0.0.1:${server.address().port}/`);
+  console.log(`Temporary UI preview: http://127.0.0.1:${server.address().port}/preview/`);
   console.log('Open the page to run real DOM assertions. Stop this server with Ctrl+C.');
 });

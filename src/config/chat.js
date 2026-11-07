@@ -16,6 +16,9 @@ const TAB_IDS = new Set(['chats', 'invites', 'members']);
 /** Normalize the SDK's chat-v1 subset only; no rendering or network effects. */
 export function normalizeChatConfig(input) {
   requireObject(input, '$');
+  if (own(input, 'kind') === 'clan-complete-ui') {
+    throw new ConfigError('kind', 'Complete-experience configuration is a separate format; use validateExperienceConfig for structural validation.', 'unsupported_config_format');
+  }
   if (own(input, 'kind') === 'clan-experience-design-proposal') {
     throw new ConfigError('kind', 'Clan design is a separate format; its adapter is deferred.', 'unsupported_config_format');
   }

@@ -1,6 +1,35 @@
-# SDK compatibility review and S-03 decisions
+# SDK compatibility review and implementation decisions
+
+## 2026-11-07: complete-experience structural format separation
+
+The user supplied `kind: "clan-complete-ui"` input and requested structural-only validation. The initial reference fixture uses version 1 (the attachment's 2 changed to 1); numeric version validation remains the requested finite-positive check, not renderer capability gating. Added `validateExperienceConfig` preserving the original object/additional fields and checking only the essential structure and per-screen section ID uniqueness. No shared backend or component contract was modified.
+
+Confirmed SDK format-dispatch issue: before this change, `src/config/chat.js:normalizeChatConfig` ignored the new complete-experience kind and could accept a version-1 document by dropping screens/other fields and applying chat defaults. Resolved within SDK scope by explicitly rejecting `clan-complete-ui` at `kind` with `unsupported_config_format`, while exposing structural validation separately. Existing chat defaults and valid legacy inputs remain unchanged. No complete-experience renderer/adapter is inferred from validation, and unchecked content/permissions remain untrusted.
+
+Changed files: `src/config/experience.js`, `src/config/chat.js`, `src/index.js`, `test/experience-config.test.js`, `test/fixtures/config/complete-experience-v1.json`, `package.json`, README, this report, and the two local contract/gap documents. Actual `npm test`: **127 passed, 0 failed** (17 new structural tests and all 110 existing tests). No new rendering/networking/permission implementation, Jira update or remote merge claim was made.
+
+## 2026-11-07: caller-URL config loading clarification
+
+The user authorized production remote loading from a caller-selected `configUrl`, without inventing a team backend route/auth contract. This resolves the earlier SDK-only loader deferral while preserving the unresolved published-config contract (CFG-05). Added real HTTP loading/status/JSON validation and a remote mount handle that delegates to the existing direct mount/update, preserves drafts on refresh/failure, cancels initial loading and aborts/ignores superseded or destroyed refreshes. No shared endpoint/storage, auth/token, renderer, chat protocol or clan contract was changed. No fresh all-repository compatibility/merge claim is made in this task.
+
+Production source contains no mock data. Only the development server wires provisional `GET /__dev__/chat-config`, with bare chat-v1 fixtures and explicit error simulations. The preview uses the production remote mount/refresh API and keeps JSON overrides optional/local. Results: **110 Node tests, 41 real-browser tests passed**, including development HTTP round trips, update races, cancellation and failure retention. The manual preview Refresh changed appearance without clearing its draft. Final shared visuals, publishing/storage semantics, clan configuration and transport remain dependencies.
+
+Files changed for remote configuration loading (pre-existing uncommitted S-04 work was preserved):
+
+- Production: added `src/config/load.js`, `src/ui/remote-chat-widget.js`; updated `src/index.js` and factored the existing container check in `src/ui/chat-widget.js`. The temporary renderer, normalizer and Social request/client implementations were not changed in this task.
+- Tests/development HTTP: added `test/config-load.test.js`, `test/browser/remote-config-tests.js`, `test/dev-config-endpoint.js`; updated `test/widget-api.test.js`, `test/browser/widget-tests.js`, `test/browser/server.js` and the root `package.json` test command.
+- Preview: updated `preview/index.html` and `preview/preview.js` to use production remote mount/refresh and optional local debugging.
+- Documentation: updated `README.md`, this report, and ignored local `docs/sdk-contract-map.md` / `docs/integration-gaps.md`. No ignore rule, backend repository, published endpoint, transport or Jira state changed.
 
 Review date: 2026-11-06. Task: S-03 from `team-81-complete-sdk-guide.md`, minimal widget mount/update/destroy lifecycle. This report separates implemented code, planned contracts, unfinished dependencies and confirmed discrepancies. No other team's source, remote branch, shared contract or Jira issue was changed.
+
+## Later architecture clarification / S-04
+
+The earlier review below is a dated snapshot, not a new claim of rechecking all remotes for S-04. The frontend remote alone was freshly checked during S-04: its Git read request succeeded but returned no HEAD/branch/MR refs. Shared UI components remain an unfinished frontend dependency. The user explicitly requires the dashboard preview and game SDK to share the same supplied visual components; the local UI is temporary and must be replaced behind the renderer boundary, not developed into a duplicate permanent implementation. No shared component props/framework are assumed and no framework dependency was added.
+
+Chat S-04 implemented compatible temporary rendering through `src/ui/chat-renderer.js`, delegated to `src/ui/renderers/placeholder-chat.js`; state/lifecycle stay in the SDK, normalized config remains centralized, and input/submit callbacks do not invoke a transport. The rendered view shows disconnected/empty/unavailable states, configured tab/icon/colors/radius/size/position, and an unavailable composer. No fabricated messages are appended. `preview/` is a development host only. README and local integration gaps record the replacement plan and CFG-06 hand-off. Final visual integration is **not complete**. Clan-config and transport dependencies remain separate and unresolved.
+
+Actual S-04 verification: `npm test` **94 passed, 0 failed**; existing `npm run test:browser` server plus real browser navigation **24 passed, 0 failed**. The preview config editor was exercised: changing size/theme/tab label preserved an unsent draft. No new merge computation was performed for S-04; prior S-03 merge-tree results below apply only to their exact recorded snapshots.
 
 ## Remote evidence inspected before implementation
 
@@ -95,3 +124,94 @@ Actual verification:
 The first browser server attempt ran inside the sandbox and could not be reached; restarting the same server outside the sandbox allowed the browser tests to execute. No security/browser settings were altered. The development server was stopped after verification. The server command itself serves a browser harness; it is not a headless/CI exit-code runner. No live backend/browser CORS, token issuance, clan DTO flow or chat transport was tested.
 
 Remaining blockers: authentic clan export/adapter (clan mount), implemented backend clan/token routes and exact player/member DTOs, dashboard persistence/export contract, and versioned chat transport contract. Missing code is a dependency, not an automatically declared integration conflict. Full two-widget S-03 is **partially complete**; the compatible chat lifecycle is implemented and verified.
+## 2026-11-07 — Discover implementation / latest compatibility check
+
+This dated entry supersedes earlier “no clan export/rendering” and active-MR
+statements for the Discover scope only. Earlier entries retain their original
+snapshot dates and results. Git access succeeded for all four projects. The
+authenticated group merge-request page showed **0 open, 8 merged**; fetched MR
+refs are historical snapshots, not active MRs. No other team's repository was
+modified and nothing was pushed.
+
+| Repository / ref | Inspected SHA / evidence |
+| --- | --- |
+| clan-backend default `main` | `0b5e67c8e60a86944a168f6cd017947335c3f917`; Social routes/service, OpenAPI, HTTP errors/JWT helpers, architecture |
+| clan-backend `develop` | `4ef8def351cd7f176ee1678133b5471321b73e38`; Social routes, OpenAPI, auth middleware, migrations/tree |
+| clan-backend historical MR !8 head | `8ca1ffad9d07f16ca2b8703b37e118f9f3000285`; relevant Social handler/auth/schema snapshot; diff against develop |
+| clan-backend `feat/TEAM-88-game-api-keys` | `50f0776eaf0e9f3be7a0a6e90ac6c180a86afaca`; route/OpenAPI inventory and relevant Social handler; Platform API-key work does not establish clan DTOs |
+| clan-backend `feat/TEAM-87-register-existing-game` | `bde3b20954175b15d026a11f73703f6413ed78d2`; changed-file inventory against main: Platform registration, not a clan contract |
+| clan-backend `chore/compose-auto-migrate` | `c60f6c681bee0aeb04b542f4cbe9d1c3b442d2cf`; ref inventory only, no claim of full implementation review |
+| clan-sdk default `main`, `nuray/feature/client` | `f9cdc5cec9d32ebc463251fc910240f632137f07`; existing Social client baseline |
+| clan-sdk working branch / origin `nuray/feature/widget` | `8dd6d5e9c19fd01f33d55f484482515102be107b`; fetched origin equals committed local HEAD; local uncommitted work retained |
+| clan-frontend / demo-game | `ls-remote --symref … HEAD` and branch inventory succeeded but returned no refs; no default branch, commit, components or consumer code to inspect |
+
+Access verification used `git remote -v`, `git ls-remote`, SDK fetch and an
+isolated temporary bare backend clone including MR refs. The linked studio was
+opened and its **Discover** player-facing panel inspected; no remote website
+source/export or other screen implementation is claimed. The authentic attached
+`clan-complete-ui` fixture (version changed to 1 as instructed) is the config
+reference. There was no separately accessible screenshot attachment in this task.
+
+**D-01 remains a dependency, not an incompatible implemented API.** Main and
+develop `services/social/internal/handler/handler.go: Routes` and
+`openapi/social.yaml` still expose only `/health` and `/ready`. Develop/MR !8
+add player auth and players/clans/members migrations; a database schema is not
+a response DTO. No actual list wrapper, emblem, capacity/availability fields,
+join success DTO/status, or no-clan discriminator is implemented. Missing-route
+404 remains an error, never an empty clan list or no-clan success.
+
+Confirmed compatibility: `pkg/httpx` retains `{error:{code,message}}`.
+Develop `auth.RequirePlayer` expects Bearer player JWT, `gid` game UUID, external
+player `sub`; errors include missing_token, token_expired, wrong_token_type and
+invalid_token. Existing Social callback/one-401-retry behavior is preserved,
+tokens remain opaque and no player bootstrap or secret header was added.
+Social CORS defaults to localhost:5174 (not 127.0.0.1:5175); the local demo is
+same-origin mock traffic, not evidence that live CORS/token issuance works.
+No WebSocket or published-config contract was found or used for this screen.
+
+Resolution within SDK scope: additive `sdk.mountExperience` validates the
+supplied Discover subset separately from minimal structural validation; its
+controller uses the existing `listClans` and `joinClan`. A required synchronous
+`clanAdapter` maps externally confirmed data into documented internal rendering
+fields. There is **no default wire mapping or production mock**. Section
+order/visibility/copy/theme, loading/search races, retry, join pending/error and
+events, update/destroy and internal navigation are implemented. The absent
+navigation boundary is now a small native `clan-sdk:navigate` / `clan-sdk:joined`
+event boundary, not a claimed pre-existing public API. Create gets only a
+missing-target handoff with Back, no screen component/form or Clan Home.
+
+Options for the missing DTO: infer fields from SQL/design samples (fast but
+risks incorrect IDs/capacity/join behavior); wait on all UI work (unnecessarily
+blocks independent work); or build a replaceable renderer/controller with an
+explicit adapter (recommended and implemented). Tradeoff: production automatic
+DTO mapping remains blocked and the caller must currently supply an adapter.
+Next steps: publish list/join OpenAPI with examples and statuses; confirm
+emblems, counts/capacity and availability; implement/test the corresponding SDK
+adapter; then verify real token/CORS/list/join behavior. Farida's Social T9–T14
+brief supports the Social handoff; ownership of additional DTO/emblem decisions
+is unconfirmed. No shared contract was changed by this implementation.
+
+**CFG-06 remains a frontend dependency:** remote frontend has no shared UI.
+The DOM renderer remains temporary behind `src/ui/experience-renderer.js` and
+contains no HTTP/authentication. Frontend should supply framework/styles/props
+before final replacement. Current internal view-model fields are not proposed
+shared-component props. Other complete-experience screens, legacy design-proposal
+adapter, backend config persistence, real Create navigation destination and chat
+transport remain outside scope. Do not enforce permissions from JSON rules.
+
+Git scope: committed SDK HEAD and origin/widget are identical, so no committed
+branch divergence exists at that snapshot. This is **not** a merge test of the
+dirty working tree, not proof of merging into main, and not a cross-repository
+merge claim. No merge or push was performed for this task.
+
+Verification: `npm test`: **138 passed, 0 failed**. `npm run test:browser`
+initially hit an existing server on 5174; rerun with `BROWSER_TEST_PORT=5175`
+started the existing harness. Final result: **52 passed, 0 failed**, including
+all previous 41 tests and 11 Discover cases. Browser tests use recording fake fetch and explicit provisional
+models. The Discover demo separately uses real HTTP against a development-only
+provisional service and adapter; manual checks exercised load/full state,
+server-rejected join, Create/Back and success events. No live backend integration
+was run; implemented endpoints/DTOs and a running authorized service are missing.
+`git diff --check` also passed (only normal LF/CRLF notices). New files are
+listed in the README's Discover change inventory; previous uncommitted work was
+preserved.
