@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Discover SDK — Social integration preview</title>
+<style>body{margin:0;padding:24px;background:#0e1019;color:#f4f4f9;font:14px Arial,sans-serif}main{max-width:820px;margin:auto;display:flex;gap:32px;align-items:start}aside{max-width:320px}a{color:#E779AA}#experience{min-width:0;flex:1}#events{overflow-wrap:anywhere}label{display:block;margin-top:12px}input{display:block;box-sizing:border-box;width:100%;padding:10px;margin-top:6px}button{padding:10px;margin-top:12px}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #E779AA;outline-offset:3px}[hidden]{display:none!important}@media(max-width:680px){main{flex-direction:column}body{padding:12px}#experience{width:100%}}</style>
+<main><div id="experience"></div><aside><h1>Discover SDK preview</h1><p><strong id="mode">REAL SOCIAL BACKEND</strong></p>
+<p id="live-help">Paste a player token from your game server or backend development tool. Join changes real membership. The token stays in memory for this page only.</p>
+<p id="origin-help"></p><a id="canonical-origin" hidden>Open the default allowed localhost origin</a>
+<form id="connection">
+<label for="social-url">Social service URL<input id="social-url" type="url" value="http://localhost:8082" required></label>
+<label for="player-token">Player token (without Bearer prefix)<input id="player-token" type="password" autocomplete="off" spellcheck="false" required></label>
+<button id="connect" type="submit" disabled>Mount with real Social backend</button>
+<button id="disconnect" type="button" disabled>Disconnect and clear token</button>
+</form>
+<p id="connection-status" role="status">Loading local appearance configuration…</p>
+<p id="mock-help" hidden><strong>Mock mode:</strong> fabricated data over a development-only route prefix. Search “error” for failure or “missing” for an empty result. This mock supports membership/list/join only. No real token is used.</p>
+<p><a href="./">Real backend mode</a> · <a href="?mode=mock">Explicit mock mode</a></p>
+<p>The SDK mounts the shared @clan/ui components. Create sends only a name; unsupported Social fields are disabled. A successful join refreshes real membership and opens Home. Chat transport and leave/management operations are unavailable.</p>
+<p>Edit <code>preview/discover/config.json</code> and reload to try configuration changes.</p><p id="events" role="status">No navigation or join events yet.</p><a href="/">Run browser tests</a></aside></main>
+<script type="importmap">{"imports":{"@clan/ui":"/__clan_ui__/index.js"}}</script>
+<script type="module" src="./preview.js"></script></html>

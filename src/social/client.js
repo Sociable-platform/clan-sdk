@@ -1,4 +1,9 @@
 import { createRequest } from './request.js';
+import {createPlayerSession} from './session.js';
+import {createFriendsClient} from './friends.js';
+
+const internals = new WeakMap();
+export const socialInternals = client => internals.get(client);
 
 /** Configure a Social client without fetching a token or making a request. */
 export function init(options) {
@@ -25,9 +30,10 @@ export function init(options) {
     throw new TypeError('getPlayerToken must be a function.');
   }
 
-  const request = createRequest(url.href.replace(/\/+$/, ''), getPlayerToken);
+  const session = createPlayerSession();
+  const request = createRequest(url.href.replace(/\/+$/, ''), getPlayerToken, session);
 
-  return {
+  const client = {
     listClans({ q } = {}) {
       if (q !== undefined && typeof q !== 'string') {
         throw new TypeError('q must be a string.');
@@ -52,6 +58,8 @@ export function init(options) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/members`);
     },
   };
+  internals.set(client,{session,friends:createFriendsClient(request)});
+  return client;
 }
 
 function encodeClanId(clanId) {

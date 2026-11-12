@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { init, ApiError } from 'clan-sdk';
 import { recordingFetch, jsonResponse } from './helpers/recording-fetch.js';
-import { provisionalSuccess } from './fixtures/social/provisional.js';
+import { socialContracts } from './fixtures/social/contracts.js';
 
 // Tests run serially because each replaces global fetch. Node restores t.mock
 // automatically after each test, including when assertions fail.
@@ -20,11 +20,11 @@ test('init exports five methods and makes no token or HTTP request', (t) => {
 });
 
 const operations = [
-  { name: 'listClans', call: sdk => sdk.listClans(), path: '/api/v1/clans', method: 'GET', result: provisionalSuccess.list },
-  { name: 'createClan', call: sdk => sdk.createClan({ name: 'Dragons', tag: 'ignored' }), path: '/api/v1/clans', method: 'POST', body: '{"name":"Dragons"}', result: provisionalSuccess.create, status: 201 },
-  { name: 'joinClan', call: sdk => sdk.joinClan('clan-1'), path: '/api/v1/clans/clan-1/join', method: 'POST', result: provisionalSuccess.join },
-  { name: 'myClan', call: sdk => sdk.myClan(), path: '/api/v1/players/me/clan', method: 'GET', result: provisionalSuccess.mine },
-  { name: 'clanMembers', call: sdk => sdk.clanMembers('clan-1'), path: '/api/v1/clans/clan-1/members', method: 'GET', result: provisionalSuccess.members },
+  { name: 'listClans', call: sdk => sdk.listClans(), path: '/api/v1/clans', method: 'GET', result: socialContracts.list },
+  { name: 'createClan', call: sdk => sdk.createClan({ name: 'Dragons', tag: 'ignored' }), path: '/api/v1/clans', method: 'POST', body: '{"name":"Dragons"}', result: socialContracts.create, status: 201 },
+  { name: 'joinClan', call: sdk => sdk.joinClan(socialContracts.join.id), path: `/api/v1/clans/${socialContracts.join.id}/join`, method: 'POST', result: socialContracts.join },
+  { name: 'myClan', call: sdk => sdk.myClan(), path: '/api/v1/players/me/clan', method: 'GET', result: socialContracts.mine },
+  { name: 'clanMembers', call: sdk => sdk.clanMembers(socialContracts.join.id), path: `/api/v1/clans/${socialContracts.join.id}/members`, method: 'GET', result: socialContracts.members },
 ];
 
 for (const operation of operations) {

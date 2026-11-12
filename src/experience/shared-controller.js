@@ -1,0 +1,121 @@
+import {createDiscoverController} from './discover-controller.js';
+import {socialClanAdapter} from '../social/clan-adapter.js';
+
+// Runtime state and confirmed HTTP actions only; @clan/ui owns the visual tree.
+export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen}) {
+  let dead = false;
+  let revision = 0;
+  let visit = 0;
+  let state = {screen:'discover', tab:'clan', clan:null, role:null, members:[],
+    status:'idle', clans:[], query:'', error:'', joinError:'', pendingJoin:null,
+    joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false};
+  const emit = () => { if (!dead) onChange({...state}); };
+  const fail = error => {
+    state = {...state, error:error?.message || 'Social request failed.', profilePending:false};
+    emit();
+  };
+  // Only list after membership is known; enabling a tab cannot bypass auth state.
+  const list = createDiscoverController({
+    listClans:q => sdk.listClans(q), joinClan:id => sdk.joinClan(id), clanAdapter, enabled:false,
+    onChange(next) { const {screen, ...rest} = next; state = {...state, ...rest}; emit(); },
+    onNavigate() {},
+    onJoined(detail) { onEvent('joined',detail); void membership('home'); },
+  });
+  async function membership(target) {
+    const ticket = ++revision;
+    const currentVisit = visit;
+    state = {...state, profilePending:true, error:''}; emit();
+    try {
+      const result = await sdk.myClan();
+      if (dead || !enabled || ticket !== revision) return;
+      const [clan] = socialClanAdapter({clans:[result?.clan]});
+      if(typeof result.role!=='string'||!result.role.trim())throw new TypeError('myClan must include the player role.');
+      state = {...state, clan, role:result.role, membershipKnown:true,
+        profilePending:false, screen:currentVisit === visit ? target ?? 'home' : state.screen==='create'?'home':state.screen,
+        tab:currentVisit === visit ? 'clan' : state.tab, error:''};
+      state.screen = resolveScreen(state.screen, true);
+      list.navigate(state.tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
+      list.setEnabled(true); emit();
+      if(state.screen === 'members')void members();
+    } catch (error) {
+      if (dead || !enabled || ticket !== revision) return;
+      if (error.status === 404 && error.code === 'not_in_clan') {
+        state = {...state, clan:null, role:null, membershipKnown:true, profilePending:false,
+          screen:currentVisit === visit ? 'discover' : state.screen, error:''};
+        state.screen = resolveScreen(state.screen, false);
+        list.navigate(state.tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
+        const firstLoad = state.status === 'idle';
+        list.setEnabled(true);
+        if (!firstLoad && state.screen === 'discover') void list.retry();
+        emit();
+      } else fail(error);
+    }
+  }
+  async function members() {
+    const ticket = ++revision;
+    state = {...state, error:''}; emit();
+    try {
+      const value = await sdk.clanMembers(state.clan.id);
+      if (!dead && enabled && ticket === revision) {
+        state = {...state, members:value.members.map(m => ({id:m.playerId, name:m.displayName, role:m.role})), error:''}; emit();
+      }
+    } catch (error) { if (!dead && ticket === revision) fail(error); }
+  }
+  return {
+    start() { if (enabled) return membership(); },
+    search:q => list.search(q),
+    join(id) { if (!state.profilePending && state.membershipKnown && !state.clan && !state.createPending) void list.join(id); },
+    retry() {
+      if(state.screen === 'members' && state.clan)return members();
+      return state.membershipKnown && state.screen === 'discover' ? list.retry() : membership(state.clan ? 'home' : undefined);
+    },
+    navigate(screen) {
+      screen = resolveScreen(screen, Boolean(state.clan));
+      if (dead || !enabled || screen === state.screen) return;
+      visit++;
+      if (!state.profilePending) revision++;
+      const previousScreen = state.screen;
+      state = {...state, screen, tab:'clan', error:''};
+      list.navigate(screen === 'discover' ? 'discover' : 'create'); emit();
+      onEvent('navigate',{screen,previousScreen});
+      if (screen === 'members' && state.clan) void members();
+    },
+    reconcile() {
+      if(dead||!enabled)return;
+      const screen = resolveScreen(state.screen, Boolean(state.clan));
+      if(screen === state.screen)return;
+      visit++;
+      if(!state.profilePending)revision++;
+      state = {...state,screen};
+      list.navigate(state.tab === 'clan' && screen === 'discover'?'discover':'create');emit();
+      if(screen === 'members' && state.clan)void members();
+    },
+    tab(tab) {
+      if (dead || tab === state.tab) return;
+      visit++;
+      if (!state.profilePending) revision++;
+      state = {...state, tab};
+      list.navigate(tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
+      emit(); onEvent('tab',{tab});
+    },
+    async create({name}) {
+      if (dead || !enabled || !state.membershipKnown || state.createPending || state.clan) return;
+      const currentVisit = visit;
+      state = {...state, createPending:true, error:''}; emit();
+      try {
+        const clan = await sdk.createClan({name}); // No badge/tag/description wire fields exist.
+        if (dead || currentVisit !== visit) return;
+        onEvent('created',{clanId:clan.id}); await membership('home');
+      } catch (error) { if (!dead && currentVisit === visit) fail(error); }
+      finally { if (!dead) { state = {...state, createPending:false}; emit(); } }
+    },
+    setEnabled(value) {
+      if (dead || enabled === value) return;
+      enabled = value; revision++; visit++;
+      list.setEnabled(false);
+      state = {...state, status:'idle', profilePending:false, membershipKnown:false}; emit();
+      if (value) void membership();
+    },
+    destroy() { dead = true; revision++; visit++; list.destroy(); },
+  };
+}
