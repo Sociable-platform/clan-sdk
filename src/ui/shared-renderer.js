@@ -5,7 +5,7 @@ import {decorateChat,selectedChatKey} from './chat-controls.js';
 
 // Same source components/styles as dashboard preview. These small runtime hooks
 // bridge missing shared-package inputs; they never fetch/authenticate or invent data.
-export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),onChatRefresh=()=>{},onChatReconnect=()=>{},onChatEarlier=()=>{},live = true} = {}) {
+export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),live = true} = {}) {
   let handle, shadow, observer;
   let data = {}, config = {}, destroyed = false;
   const doc = container.ownerDocument;
@@ -136,8 +136,6 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     },()=>{}); // Controller renders failure and retains the original draft.
   }
   const click = event => {
-    const chatAction=event.target.closest?.('[data-chat-action]')?.dataset.chatAction;
-    if(chatAction){if(chatAction==='refresh')onChatRefresh();else if(chatAction==='earlier')onChatEarlier();else onChatReconnect();return;}
     const friend=event.target.closest?.('[data-friend-action]');
     if(friend){event.preventDefault();event.stopImmediatePropagation();if(!friend.disabled)onFriendAction(friend.dataset.friendAction,friend.dataset.friendId);return;}
     if(event.target.closest?.('[data-friend-refresh]')){onFriendRefresh();return;}

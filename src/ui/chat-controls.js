@@ -15,11 +15,7 @@ export function decorateChat(shadow,data) {
   const status=shadow.querySelector('[data-sdk-status]');
   if(status){
     if(status.firstChild?.textContent!==message){const text=shadow.ownerDocument.createElement('span');text.textContent=message;status.replaceChildren(text);}
-    if(state&&state.status!=='unavailable'){
-      const controls=[['refresh','Refresh chat'],['reconnect','Reconnect chat'],...(history?.hasMore?[['earlier','Load earlier messages']]:[])];
-      for(const [action,label]of controls)if(!status.querySelector(`[data-chat-action="${action}"]`)){const btn=shadow.ownerDocument.createElement('button');btn.type='button';btn.className='sk-btn sk-btn-ghost';btn.dataset.chatAction=action;btn.textContent=label;status.append(btn);}
-      if(!history?.hasMore)status.querySelector('[data-chat-action="earlier"]')?.remove();
-    }
+
   }
   return key;
 }

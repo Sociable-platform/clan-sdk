@@ -1,10 +1,36 @@
 # Clan SDK
 
-Plain JavaScript ESM Social client and widget lifecycle. The SDK and dashboard now render the **same `@clan/ui` package**, provided in `clan-frontend/packages/ui`. No dashboard app, React runtime, router or editor panels are imported. Frontend source is read-only; there is no second widget component/style copy in this SDK.
+Plain JavaScript ESM Social client and widget lifecycle. The SDK and dashboard render the **same `@clan/ui` package**, installed from the Clan GitLab npm registry. No dashboard app, React runtime, router, editor panels or source checkout is required. The SDK does not maintain a second widget component/style copy.
 
 ## Install and verify
 
-Node 22 or newer; keep the supplied frontend checkout at `clan-frontend`:
+Node 22 or newer. The `.npmrc` next to `package.json` contains exactly:
+
+```ini
+@clan:registry=https://gitlab.com/api/v4/groups/146782114/-/packages/npm/
+//gitlab.com/api/v4/groups/146782114/-/packages/npm/:_authToken=${GITLAB_NPM_TOKEN}
+```
+
+Keep that placeholder literal. Set `GITLAB_NPM_TOKEN` in the environment of the
+terminal running npm. Use a **read-only group deploy token** with
+`read_package_registry` permission and access to the package. No publish/write
+permission is needed. This installation credential is separate from the game's
+secret API key and the player's runtime token; never put it in browser code,
+configuration JSON, a `VITE_` variable or a committed file.
+
+Windows PowerShell (masked local prompt, token used only by this shell):
+
+```powershell
+$registrySecret = Read-Host 'GitLab read-only deploy token' -AsSecureString
+$env:GITLAB_NPM_TOKEN = [System.Net.NetworkCredential]::new('', $registrySecret).Password
+npm ci
+npm test
+# When finished with npm in this shell:
+Remove-Item Env:\GITLAB_NPM_TOKEN
+Remove-Variable registrySecret
+```
+
+Other shells can export an existing secret environment variable before running:
 
 ```sh
 npm ci
@@ -12,7 +38,28 @@ npm test
 npm run test:browser
 ```
 
-Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. There is no build script. `src/index.js` is the ESM entrypoint. The root package is private; `@clan/ui` is a local file dependency linked to the canonical frontend source. A separately published/versioned shared package is still a release dependency. Do not distribute an SDK package that leaves that file dependency unresolved.
+`npm ci` installs the exact version in `package-lock.json`; it does not select a
+new release just because `^0.1.0` allows one. To adopt a newer compatible release:
+
+```sh
+npm update @clan/ui
+npm test
+npm run test:browser
+```
+
+Include the resulting changed `package-lock.json` with every dependency update.
+Do not substitute `file:` links or copied repositories. No SDK bundle/CDN build
+is introduced here. The lockfile currently resolves registry release **0.1.1**.
+See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
+
+Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. The server resolves the installed package's public export and serves its relative modules/styles/assets, without assuming a source directory layout. It prints the installed version at startup. There is no build script; `src/index.js` is the ESM entrypoint.
+
+CI: no installation pipeline file was found in this SDK checkout. Configure
+`GITLAB_NPM_TOKEN` as a **masked secret CI/CD variable** in GitLab (protected where
+appropriate for your branch policy), using the read-only deploy token above.
+An install job should run `npm ci` followed by `npm test`, after the generated
+lockfile is committed. Do not echo the variable or enable shell tracing around
+credentials. No CI pipeline was run or claimed passing for this migration.
 
 `npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock. Actual current results are in [shared renderer notes](docs/shared-renderer.md).
 
@@ -62,7 +109,7 @@ ETag: "v1"
 
 This is the inspected W6 route, not a guessed dashboard/authenticated route. Config requests use `credentials:'omit'`, no Authorization, no API key and no Social token callback. The loader unwraps `config`. Per the user's existing policy, **published config payloads are not SDK-schema-validated**. JSON/W6 envelope checks remain; the shared renderer safely selects supported fields. An unrenderable payload uses the render error boundary. Direct caller updates have minimal type/appearance checks before replacing working UI.
 
-The current document has `schemaVersion:1`, `game_id`, `theme.colors/fonts/frame/buttons/panel/textures/components`, `layout`, `friends`, `clan.screens`, `chat`, and `texts`. It has no prototype `kind` or root `screens`. See the frontend [schema](clan-frontend/docs/config-v1/config.v1.schema.json), [examples](clan-frontend/docs/config-v1/examples) and [SDK regression fixture](test/browser/fixtures/platform-widget-v1.json). The SDK passes the full document to `@clan/ui`; it no longer converts current JSON into old Discover sections.
+The current document has `schemaVersion:1`, `game_id`, `theme.colors/fonts/frame/buttons/panel/textures/components`, `layout`, `friends`, `clan.screens`, `chat`, and `texts`. It has no prototype `kind` or root `screens`. See the self-contained [SDK regression fixture](test/browser/fixtures/platform-widget-v1.json). The SDK passes the full document to `@clan/ui`; it no longer converts current JSON into old Discover sections.
 
 The config is retained across internal screen/tab navigation. Navigation never refetches config or changes the game's URL. Each view reads the same theme and its own `clan.screens` settings. No config loading is duplicated in the game.
 
@@ -182,7 +229,7 @@ sdk.resetPlayerSession();
 
 Verification: **225 Node tests**, **70 real-browser mock tests**, and **8 live PASS groups** against local Social with two isolated dedicated test players (includes relationship cleanup). No FAIL/BLOCKED live operations in that run. This verifies the HTTP SDK against the running service, not its deployed SHA, browser CORS, Platform token exchange or websocket delivery. The Node-only runner used the existing local development signing key in memory and logged no tokens; dedicated player records remain, relationships were removed. See [Friends report](docs/friends-integration.md) for exact source revisions, limitations and changed files.
 
-Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-in**, never part of npm test: `node test/live/friends.js --local-dev-key` for the supplied local backend/key. Alternatively provide `FRIENDS_LIVE_SOCIAL_URL`, `FRIENDS_LIVE_DEDICATED=1`, `FRIENDS_LIVE_TOKEN_A/B` as environment variables for two dedicated players whose external IDs start with `sdk-friends-test-`; run without the flag. Tokens are never printed. Do not use real player accounts for this destructive relationship lifecycle test.
+Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-in**, never part of npm test: `node test/live/friends.js --local-dev-key` requires an explicitly supplied `FRIENDS_LIVE_DEV_KEY` external development signing-key path. Alternatively provide `FRIENDS_LIVE_SOCIAL_URL`, `FRIENDS_LIVE_DEDICATED=1`, `FRIENDS_LIVE_TOKEN_A/B` as environment variables for two dedicated players whose external IDs start with `sdk-friends-test-`; run without the flag. The opt-in live Chat fixture requires `LIVE_CHAT_DEV_KEY` and running development services. No backend checkout or development key is needed for SDK installation, normal tests or preview. Tokens and keys are never printed. Do not use real player accounts for this relationship lifecycle test.
 
 Host events bubble from the widget: `clan-sdk:navigate` (`screen`, `previousScreen`), `clan-sdk:tab` (`tab`), `clan-sdk:joined`/`created` (`clanId`). The SDK performs the confirmed actions itself.
 
@@ -271,8 +318,9 @@ const {messages, hasMore} = await sdk.listMessages(conversations[0].id, {
 The widget owns selection, history, send and receive; the game needs no message
 handlers. It sends `message.send` using the **returned conversation ID**, clears
 the draft only after ACK, and displays final stored text from `message.new` or
-history. Pending/error/disconnected/empty states and explicit Refresh/Reconnect/
-Load earlier controls use the shared renderer. Unknown delivery is never replayed
+history. Pending/error/disconnected/empty states use the shared renderer without
+SDK-injected Refresh, Reconnect or Load earlier buttons. Hosts can explicitly
+reconnect through `widget.reconnectChat()`. Unknown delivery is never replayed
 automatically. Reconnect reloads membership/history, pages back to the last known
 message, merges incoming frames and deduplicates by message ID. The initial page
 uses `chat.historyLimit` capped at the backend maximum100, default50 if absent.

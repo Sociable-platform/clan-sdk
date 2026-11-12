@@ -3,7 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {createPrivateKey,randomUUID,sign} from 'node:crypto';
 import {init} from '../../src/index.js';
 export async function prepareLiveChat() {
- const key=createPrivateKey(await readFile(process.env.LIVE_CHAT_DEV_KEY??'C:/Users/Nicat/GolandProjects/clan-backend/secrets/platform_jwt_private.pem'));
+ if(!process.env.LIVE_CHAT_DEV_KEY)throw new Error('Set LIVE_CHAT_DEV_KEY to an explicit external development signing-key path for this opt-in test.');
+ const key=createPrivateKey(await readFile(process.env.LIVE_CHAT_DEV_KEY));
  const gameId=randomUUID(),tag='sdk-chat-test-'+randomUUID();
  const token=role=>{const now=Math.floor(Date.now()/1000),head=Buffer.from(JSON.stringify({alg:'EdDSA',typ:'JWT'})).toString('base64url'),body=Buffer.from(JSON.stringify({sub:tag+'-'+role,gid:gameId,name:'SDK Live Chat '+role,typ:'player',iat:now,exp:now+900})).toString('base64url'),payload=head+'.'+body;return payload+'.'+sign(null,Buffer.from(payload),key).toString('base64url');};
  const clients=Object.fromEntries(['A','B'].map(role=>[role,init({socialUrl:'http://localhost:8082',realtimeUrl:'http://localhost:8083',getPlayerToken:async()=>token(role)})]));

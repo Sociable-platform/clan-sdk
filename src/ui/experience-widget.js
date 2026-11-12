@@ -36,7 +36,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   const defaultTab=()=>current.clan?.enabled===true?'clan':current.friends?.enabled===true?'friends':'chat';
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
-    renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body),onChatRefresh:()=>chat.refresh(),onChatReconnect:()=>chat.reconnect(),onChatEarlier:()=>chat.loadEarlier()});
+    renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body)});
     chat=createChatController({client:chatClient(sdk),onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh(),onConfig:detail=>notify('config-updated',detail)});
     friends=createFriendsController({sdk,onChange:next=>{friendState=next;render();}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{

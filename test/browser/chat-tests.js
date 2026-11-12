@@ -29,7 +29,7 @@ export function registerChatTests({test,assert,container}) {
  }
  test('live Chat waits for hello, loads actual conversation/history and incoming frames repaint immediately',()=>fixture(async({mount,sockets,calls})=>{
   const a=mount();await waitFor(()=>sockets.length);assert(a.root.textContent.includes('Connecting'),'Socket open treated as authentication');sockets[0].hello();await waitFor(()=>a.root.textContent.includes('No messages yet'));
-  assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');assert(a.root.querySelector('.sk-header .sk-status').textContent==='Ali','Authenticated header missing');
+  assert(!a.root.querySelector('[data-chat-action]'),'SDK injected extra chat buttons');assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');assert(a.root.querySelector('.sk-header .sk-status').textContent==='Ali','Authenticated header missing');
   sockets[0].frame('message.new',{conversationId:room.id,message:message('live','Immediate live message')});await waitFor(()=>a.root.textContent.includes('Immediate live message'));assert(a.root.querySelectorAll('.sk-msg').length===1,'Incoming message duplicated');
  }));
  test('live Chat retains draft during pending/error, prevents duplicates and only clears on ACK',()=>fixture(async({mount,ready,sockets,messages})=>{
@@ -44,8 +44,8 @@ export function registerChatTests({test,assert,container}) {
   const input=a.root.querySelector('[data-key="message"]');assert(input.value==='Keep draft'&&a.root.activeElement===input,'Theme update lost draft/focus');const before=a.root.innerHTML;
   next.schemaVersion=2;let failed=false;try{a.handle.updateConfig(next);}catch{failed=true;}assert(failed&&a.root.innerHTML===before,'Invalid config changed live UI');
  }));
- test('live Chat list/history error and explicit refresh recover without invented messages',()=>{let fail=true;return fixture(async({mount,sockets})=>{
-  const a=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>a.root.textContent.includes('Service unavailable'));assert(!a.root.querySelector('.sk-msg'),'Error fabricated messages');fail=false;a.root.querySelector('[data-chat-action="refresh"]').click();await waitFor(()=>a.root.textContent.includes('No messages yet'));
+ test('live Chat list/history error and public reconnect recover without invented messages',()=>{let fail=true;return fixture(async({mount,sockets})=>{
+  const a=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>a.root.textContent.includes('Service unavailable'));assert(!a.root.querySelector('.sk-msg'),'Error fabricated messages');assert(!a.root.querySelector('[data-chat-action]'),'SDK injected recovery buttons');fail=false;a.handle.reconnectChat();await waitFor(()=>sockets.length===2);sockets[1].hello();await waitFor(()=>a.root.textContent.includes('No messages yet'));
  },()=>fail?json({error:{code:'unavailable',message:'Service unavailable'}},503):undefined);});
  test('live Chat disconnect retains draft; reconnect refetches missed messages and never resends',()=>fixture(async({mount,ready,sockets,messages})=>{
   const a=mount();await ready(a);type(a.root,'message','Uncertain send');a.root.querySelector('.sk-composer button').click();sockets[0].onclose({code:1000});await waitFor(()=>a.root.textContent.includes('unknown'));
