@@ -5,6 +5,7 @@ import { mountExperience } from './ui/experience-widget.js';
 import { platformSettings, createPlatformConfigLoader } from './config/platform.js';
 import { mountPlatformExperience } from './ui/platform-experience.js';
 import {bindPlayerSession} from './social/session.js';
+import {bindChatClient,chatClient} from './chat/client.js';
 
 const platformLoaders = new WeakMap();
 const clients = new WeakMap();
@@ -12,6 +13,8 @@ const clients = new WeakMap();
 // Prototype methods allow additive widget capabilities without changing the
 // existing five own Social operations. Construction/import never touches the DOM.
 class SDK {
+  listConversations() { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listConversations(); }
+  listMessages(id,options) { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listMessages(id,options); }
   getMyPlayer() { return clients.get(this).friends.getMyPlayer(); }
   listFriends() { return clients.get(this).friends.listFriends(); }
   searchPlayers(options) { return clients.get(this).friends.searchPlayers(options); }
@@ -46,6 +49,7 @@ export function init(options) {
   const sdk = Object.assign(new SDK(), social);
   clients.set(sdk,socialInternals(social));
   bindPlayerSession(sdk,clients.get(sdk).session);
+  bindChatClient(sdk,options,clients.get(sdk));
   if (settings) platformLoaders.set(sdk,createPlatformConfigLoader(settings));
   return sdk;
 }

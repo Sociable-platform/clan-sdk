@@ -7,10 +7,12 @@ import { handleDevConfigRequest } from '../dev-config-endpoint.js';
 import { handleDevDiscoverRequest } from '../dev-discover-endpoint.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const liveChat=process.env.LIVE_CHAT_TEST==='1'?await (await import('../live/chat-fixture.js')).prepareLiveChat():null;
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    if(liveChat?.handle(req,res,url))return;
     if (handleDevConfigRequest(req, res, url)) return;
     if (handleDevDiscoverRequest(req, res, url)) return;
     const pathname = decodeURIComponent(url.pathname);
@@ -46,3 +48,4 @@ server.listen(Number(process.env.BROWSER_TEST_PORT ?? 5174), '127.0.0.1', () => 
   console.log(`Shared SDK/UI preview: http://127.0.0.1:${server.address().port}/test/browser/shared-preview.html`);
   console.log('Open the page to run real DOM assertions. Stop this server with Ctrl+C.');
 });
+if(liveChat)process.once('SIGINT',()=>{void liveChat.cleanup().finally(()=>server.close(()=>process.exit(0)));});

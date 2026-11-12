@@ -1,6 +1,7 @@
 import { createRequest } from './request.js';
 import {createPlayerSession} from './session.js';
 import {createFriendsClient} from './friends.js';
+import {createTokenAcquisition} from './token.js';
 
 const internals = new WeakMap();
 export const socialInternals = client => internals.get(client);
@@ -31,7 +32,8 @@ export function init(options) {
   }
 
   const session = createPlayerSession();
-  const request = createRequest(url.href.replace(/\/+$/, ''), getPlayerToken, session);
+  const acquire = createTokenAcquisition(getPlayerToken,session);
+  const request = createRequest(url.href.replace(/\/+$/, ''), getPlayerToken, session,acquire);
 
   const client = {
     listClans({ q } = {}) {
@@ -58,7 +60,7 @@ export function init(options) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/members`);
     },
   };
-  internals.set(client,{session,friends:createFriendsClient(request)});
+  internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request)});
   return client;
 }
 

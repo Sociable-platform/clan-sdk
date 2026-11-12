@@ -27,7 +27,8 @@ const sdk = init({
   gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
   platformUrl: 'http://localhost:8081',
   socialUrl: 'http://localhost:8082',
-  getPlayerToken: async () => obtainPlayerTokenFromGameServer(),
+  realtimeUrl: 'http://localhost:8083', // HTTP(S) base; SDK derives ws/wss
+  getPlayerToken: async ({forceRefresh}) => obtainPlayerTokenFromGameServer({forceRefresh}),
 });
 
 const container = document.querySelector('#social-widget');
@@ -119,7 +120,7 @@ Curated Google font families use the same `googleFontsHref` as dashboard preview
 | `clan.screens.home.showStats` | Shared Home details; SDK suppresses unsupported live level/XP data |
 | `texts.terms/labels` | Shared label overrides and `{Clan}`/`{clan}`/`{Clans}`/`{clans}` substitution |
 | Ordered `clan.badges.allowed` / `clan.roles` | Shared picker/role presentation order; runtime permission authority remains backend |
-| Chat layout/limits | Shared display only. No chat delivery, profanity enforcement or slow-mode enforcement is claimed |
+| Chat layout/limits | Shared bubbles/log/composer; live Realtime integration below. Server enforces filtering, permissions and slow mode |
 
 There is **no generic screen/section/tab order field** in the current schema. Old prototype section arrays/hero layouts are not a second design system. Unknown fields remain in config; the renderer only consumes its supported fields. Minimal direct checks are not a full copy of the frontend's proposed strict JSON Schema validator and do not enforce permissions.
 
@@ -130,7 +131,7 @@ Live runtime flow:
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
 4. Create uses the supplied shared form and **only `{name}`** with `createClan`. Badge/tag/description controls are disabled in live mode because the backend doesn't accept them. Duplicate writes are guarded. Server errors remain visible; success refreshes membership.
 5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
-6. Friends and incoming/outgoing requests use the confirmed Friends API described below. Chat messages/threads remain empty without transport; Send/Enter preserve unavailable drafts. Leave/kick/promote/demote remain unwired in this SDK and disabled. Config cannot grant backend permissions.
+6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave/kick/promote/demote remain unwired in this SDK and disabled. Config cannot grant backend permissions.
 
 The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
 
@@ -170,7 +171,7 @@ Search requires nonblank q (1–50 characters after server trimming), optional i
 
 The UI loads only when `friends.enabled === true` and Friends opens. It uses shared `@clan/ui` rows/search/Accept and shared button styles. SDK bindings add Add/Decline/Cancel/Remove/Refresh controls to those existing rows, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
 
-The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. Backend RabbitMQ/Realtime friend notifications now exist, but this SDK has no realtime transport, so none is invented or partially opened here. Chat and presence remain unavailable.
+The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. When the live chat Realtime connection is enabled, friend notifications also request a refetch; otherwise explicit refresh remains available. Real conversation presence comes from Realtime, never preview data.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.
 
@@ -220,7 +221,7 @@ Run `npm run preview` (same server as browser tests), then:
 - `?mode=mock` explicitly opts that page into a development-only Social route prefix with fabricated data. This mock supports membership/list/join; other operations report unsupported.
 - [Legacy remote Chat API preview](http://127.0.0.1:5174/preview/): bare legacy config HTTP mock and refresh; kept only for compatibility testing.
 
-The requested editor URL is reachable but redirects to login in the available browser session. Full authenticated-editor visual verification is unavailable. Source inspection, 272 frontend shared/schema tests, SDK parity assertions and the comparison page establish the checked subset; they do not claim live backend/transport/game integration. The demo game is explicitly out of scope.
+The earlier editor check redirected to login; authenticated-editor visual verification remains unavailable. The earlier272 frontend/shared-schema tests and comparison page verify the supplied shared UI subset. The later live chat verification and minimal Harvest connection-settings change are recorded separately below.
 
 ## Player token callback and coordination
 
@@ -241,3 +242,57 @@ refresh bypasses that cache and supersedes older pending acquisition. Auth
 transitions clear the cache at both boundaries and block acquisition in between.
 See [token optimization report](docs/token-optimization.md) for game integration,
 source selection and actual test/build results.
+
+## Live chat
+
+`mountExperience` now connects the existing shared Chat and clan-chat components
+to Realtime when `realtimeUrl` and the published chat switches enable it. Omit
+that option to retain explicit unavailable messaging. Legacy chat-only mount APIs
+retain their previous behavior. `init` remains free of network requests.
+
+The SDK acquires the same player token as Social, opens `/api/v1/ws?token=…`,
+waits for authenticated `hello`, then reads `GET /api/v1/conversations` and the
+selected conversation's `/messages` history. HTTP uses Bearer auth and the
+existing one-401 retry. Socket token expiry requests `forceRefresh:true` through
+that same acquisition coordinator. Never log the WebSocket URL; use HTTPS/WSS
+outside local development. Configure Realtime's allowed browser origins and the
+host page's CSP `connect-src` for both HTTP(S) and WS(S) service origins.
+
+Public read methods return successful backend JSON unchanged:
+
+```js
+const {conversations} = await sdk.listConversations();
+const {messages, hasMore} = await sdk.listMessages(conversations[0].id, {
+  limit: 20, // 1–100, default 50
+  // before: oldestMessageId, // older page, newest first on the wire
+});
+```
+
+The widget owns selection, history, send and receive; the game needs no message
+handlers. It sends `message.send` using the **returned conversation ID**, clears
+the draft only after ACK, and displays final stored text from `message.new` or
+history. Pending/error/disconnected/empty states and explicit Refresh/Reconnect/
+Load earlier controls use the shared renderer. Unknown delivery is never replayed
+automatically. Reconnect reloads membership/history, pages back to the last known
+message, merges incoming frames and deduplicates by message ID. The initial page
+uses `chat.historyLimit` capped at the backend maximum100, default50 if absent.
+
+DM rooms are provisioned by the backend after friendship acceptance. Opening a
+socket never creates a room. **Clan room provisioning is still absent in the
+inspected backend**: SDK supports actual returned clan rooms with matching
+membership/config, but does not invent a conversation ID or promise clan E2E.
+
+`widget.destroy()` closes the socket, detaches listeners and cancels timers;
+pending responses cannot repaint. For logout destroy first, then clear the host
+token cache and call `sdk.resetPlayerSession()`. For account switching update the
+callback's identity source and reset synchronously, or recreate the SDK. Widgets
+on that SDK reset their data/drafts and reconnect for the new identity. Token
+rotation alone cannot identify an account switch.
+
+`config.updated` and positive `hello.configVersion` emit
+`clan-sdk:config-updated` (`{version}`). Platform-mounted handles refresh through
+the existing public loader/cache after0–500ms jitter, with teardown/stale guards;
+direct-config hosts may handle this event themselves. No polling is added.
+
+See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
+changed files, automated results, the real two-player browser check and its limits.

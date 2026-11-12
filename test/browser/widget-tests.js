@@ -6,6 +6,7 @@ import {registerDiscoverTests} from './discover-tests.js';
 import {registerSocialPreviewTests} from './social-preview-tests.js';
 import {registerPlatformConfigTests} from './platform-config-tests.js';
 import {registerFriendsTests} from './friends-tests.js';
+import {registerChatTests} from './chat-tests.js';
 
 const sandbox=document.querySelector('#sandbox'),results=document.querySelector('#results'),cases=[];
 const test=(name,run)=>cases.push({name,run});
@@ -91,6 +92,9 @@ registerDiscoverTests({test,assert,container});
 registerSocialPreviewTests({test,assert});
 registerPlatformConfigTests({test,assert,container});
 registerFriendsTests({test,assert,container});
+registerChatTests({test,assert,container});
 let failures=0;
-for(const entry of cases){const result=document.createElement('li');try{await entry.run();result.textContent=`PASS: ${entry.name}`;}catch(error){failures++;result.textContent=`FAIL: ${entry.name}: ${error.message}`;}results.append(result);}
+// Let settled token/HTTP microtasks drain before the next case installs its
+// recording fetch. Abandoned requests must not contaminate another fixture.
+for(const entry of cases){const result=document.createElement('li');try{await entry.run();result.textContent=`PASS: ${entry.name}`;}catch(error){failures++;result.textContent=`FAIL: ${entry.name}: ${error.message}`;}results.append(result);await new Promise(done=>setTimeout(done,0));}
 const summary=document.querySelector('#summary');summary.textContent=`${cases.length-failures} passed, ${failures} failed (${cases.length} browser tests)`;summary.dataset.result=failures?'failed':'passed';
