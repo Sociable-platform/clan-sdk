@@ -60,7 +60,7 @@ export function init(options) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/members`);
     },
   };
-  internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request)});
+  internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request),leaveClan:id=>request(`/api/v1/clans/${encodeClanId(id)}/leave`,{method:'POST'})});
   return client;
 }
 

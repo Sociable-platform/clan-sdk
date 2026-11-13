@@ -178,7 +178,7 @@ Live runtime flow:
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
 4. Create uses the supplied shared form and **only `{name}`** with `createClan`. Badge/tag/description controls are disabled in live mode because the backend doesn't accept them. Duplicate writes are guarded. Server errors remain visible; success refreshes membership.
 5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
-6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave/kick/promote/demote remain unwired in this SDK and disabled. Config cannot grant backend permissions.
+6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave is integrated as described below; kick/promote/demote remain disabled. Config cannot grant backend permissions.
 
 The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
 
@@ -344,3 +344,36 @@ direct-config hosts may handle this event themselves. No polling is added.
 
 See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
 changed files, automated results, the real two-player browser check and its limits.
+
+## Leave clan (TEAM-214)
+
+```js
+await sdk.leaveClan(clanId);
+```
+
+Bodyless POST `/api/v1/clans/{encodedClanId}/leave`, Bearer player auth through
+getPlayerToken, with the existing one-401 fresh-token retry. Confirmed204 returns
+undefined; other successful JSON follows the unchanged low-level HTTP convention.
+Errors retain status/code/message. No automatic network/404/409 retry.
+
+The shared Home info panel and Members screen already provide Leave and its
+confirmation. The SDK binds their existing actions.leave, shows Leaving clan…,
+and prevents duplicate submissions. Only confirmed success clears membership,
+role, members, join/search state and the old clan room/history. It uses configured
+Discover (or Create fallback), without reload. If the player navigated to Friends
+while waiting, that active tab is retained. Errors preserve membership and show
+server text safely; the player can retry via the existing confirmation.
+
+Owners may leave: the server chooses the earliest remaining member as owner
+(ties use player ID), or deletes the clan when empty. No invented leader ban is
+applied. Confirmed failures include404 clan_not_found,409 not_in_clan and403
+origin_not_allowed; ordinary authentication/service failures also remain errors.
+
+Direct-message history and its existing WebSocket remain connected. Pending old
+clan reads/events are ignored, including stale room-list snapshots; dispatched
+HTTP requests are not undone. Backend Realtime membership removal remains the
+permission authority. Account switching still requires resetPlayerSession or
+widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
+the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
+
+Verification and changed files: [TEAM-214 report](TEAM-214.md).

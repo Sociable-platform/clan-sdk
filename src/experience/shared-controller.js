@@ -6,9 +6,10 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
   let dead = false;
   let revision = 0;
   let visit = 0;
+  let membershipGeneration = 0;
   let state = {screen:'discover', tab:'clan', clan:null, role:null, members:[],
     status:'idle', clans:[], query:'', error:'', joinError:'', pendingJoin:null,
-    joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false};
+    joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false,leavePending:false,leaveError:''};
   const emit = () => { if (!dead) onChange({...state}); };
   const fail = error => {
     state = {...state, error:error?.message || 'Social request failed.', profilePending:false};
@@ -22,15 +23,17 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     onJoined(detail) { onEvent('joined',detail); void membership('home'); },
   });
   async function membership(target) {
+    if(state.leavePending)return;
+    const generation=membershipGeneration;
     const ticket = ++revision;
     const currentVisit = visit;
     state = {...state, profilePending:true, error:''}; emit();
     try {
       const result = await sdk.myClan();
-      if (dead || !enabled || ticket !== revision) return;
+      if (dead || !enabled || ticket !== revision || generation!==membershipGeneration) return;
       const [clan] = socialClanAdapter({clans:[result?.clan]});
       if(typeof result.role!=='string'||!result.role.trim())throw new TypeError('myClan must include the player role.');
-      state = {...state, clan, role:result.role, membershipKnown:true,
+      state = {...state, members:state.clan?.id===clan.id?state.members:[],clan, role:result.role, membershipKnown:true,
         profilePending:false, screen:currentVisit === visit ? target ?? 'home' : state.screen==='create'?'home':state.screen,
         tab:currentVisit === visit ? 'clan' : state.tab, error:''};
       state.screen = resolveScreen(state.screen, true);
@@ -38,9 +41,9 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       list.setEnabled(true); emit();
       if(state.screen === 'members')void members();
     } catch (error) {
-      if (dead || !enabled || ticket !== revision) return;
+      if (dead || !enabled || ticket !== revision || generation!==membershipGeneration) return;
       if (error.status === 404 && error.code === 'not_in_clan') {
-        state = {...state, clan:null, role:null, membershipKnown:true, profilePending:false,
+        state = {...state, clan:null, role:null,members:[], membershipKnown:true, profilePending:false,
           screen:currentVisit === visit ? 'discover' : state.screen, error:''};
         state.screen = resolveScreen(state.screen, false);
         list.navigate(state.tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
@@ -52,16 +55,32 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     }
   }
   async function members() {
+    if(state.leavePending)return;
+    const generation=membershipGeneration;
     const ticket = ++revision;
     state = {...state, error:''}; emit();
     try {
       const value = await sdk.clanMembers(state.clan.id);
-      if (!dead && enabled && ticket === revision) {
+      if (!dead && enabled && ticket === revision && generation===membershipGeneration) {
         state = {...state, members:value.members.map(m => ({id:m.playerId, name:m.displayName, role:m.role})), error:''}; emit();
       }
-    } catch (error) { if (!dead && ticket === revision) fail(error); }
+    } catch (error) { if (!dead && ticket === revision && generation===membershipGeneration) fail(error); }
   }
   return {
+    async leave() {
+      if(dead||!enabled||!state.clan||!state.membershipKnown||state.profilePending||state.leavePending)return;
+      const clanId=state.clan.id,generation=++membershipGeneration,currentVisit=visit;
+      revision++;state={...state,leavePending:true,leaveError:'',error:''};emit();
+      try {
+        await sdk.leaveClan(clanId);
+        if(dead||generation!==membershipGeneration)return;
+        revision++;visit++;
+        const previousScreen=state.screen,screen=resolveScreen('discover',false);
+        state={...state,clan:null,role:null,members:[],clans:[],query:'',joinedClanId:null,pendingJoin:null,createPending:false,profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',error:'',joinError:'',status:'idle',screen,tab:currentVisit===visit-1?'clan':state.tab};
+        emit();list.reset();list.navigate(state.tab==='clan'&&screen==='discover'?'discover':'create');list.setEnabled(true);
+        onEvent('left',{clanId});onEvent('navigate',{screen,previousScreen});
+      } catch(error) {if(!dead&&generation===membershipGeneration){state={...state,leavePending:false,leaveError:error?.message||'Unable to leave clan.'};emit();}}
+    },
     start() { if (enabled) return membership(); },
     search:q => list.search(q),
     join(id) { if (!state.profilePending && state.membershipKnown && !state.clan && !state.createPending) void list.join(id); },
@@ -111,9 +130,9 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     },
     setEnabled(value) {
       if (dead || enabled === value) return;
-      enabled = value; revision++; visit++;
+      enabled = value; revision++; visit++;membershipGeneration++;
       list.setEnabled(false);
-      state = {...state, status:'idle', profilePending:false, membershipKnown:false}; emit();
+      state = {...state, status:'idle', profilePending:false, membershipKnown:false,leavePending:false,leaveError:''}; emit();
       if (value) void membership();
     },
     destroy() { dead = true; revision++; visit++; list.destroy(); },

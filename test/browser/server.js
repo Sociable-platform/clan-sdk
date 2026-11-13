@@ -11,11 +11,13 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const ui=await installedUiPackage();
 const handleUi=uiPackageHandler(ui);
 const liveChat=process.env.LIVE_CHAT_TEST==='1'?await (await import('../live/chat-fixture.js')).prepareLiveChat():null;
+const liveLeave=process.env.LIVE_LEAVE_TEST==='1'?await (await import('../live/leave-fixture.js')).prepareLiveLeave():null;
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     if(liveChat?.handle(req,res,url))return;
+    if(liveLeave?.handle(req,res,url))return;
     if (handleDevConfigRequest(req, res, url)) return;
     if (handleDevDiscoverRequest(req, res, url)) return;
     const pathname = decodeURIComponent(url.pathname);
@@ -47,3 +49,4 @@ server.listen(Number(process.env.BROWSER_TEST_PORT ?? 5174), '127.0.0.1', () => 
   console.log('Open the page to run real DOM assertions. Stop this server with Ctrl+C.');
 });
 if(liveChat)process.once('SIGINT',()=>{void liveChat.cleanup().finally(()=>server.close(()=>process.exit(0)));});
+if(liveLeave)process.once('SIGINT',()=>{void liveLeave.cleanup().finally(()=>server.close(()=>process.exit(0)));});

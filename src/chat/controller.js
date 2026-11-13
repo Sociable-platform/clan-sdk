@@ -12,7 +12,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
   let dead=false,enabled=false,config={},clanId=null,socket,epoch=0,attempt=0,authTried=false,forceNext=false;
   let reconnectTimer,helloTimer,stableTimer,cooldownTimer,sequence=0,listRevision=0,selectedKey=null,rejectedVersion;
   let state={status:client?'idle':'unavailable',playerId:null,gameId:null,conversations:[],messages:{},history:{},error:'',pending:null,cooldownUntil:0};
-  const pending=new Map(),loading=new Map(),recoveryAnchors=new Map();
+  const pending=new Map(),loading=new Map(),recoveryAnchors=new Map(),roomRevisions=new Map(),revokedClans=new Set();
   const emit=()=>{if(!dead)onChange({...state});};
   const valid=ticket=>!dead&&enabled&&ticket===epoch;
   const allowed=c=>config.chat?.enabled===true&&(c.kind==='dm'?config.chat.directMessages===true:config.chat.clanChat===true&&config.clan?.enabled===true&&c.clanId===clanId);
@@ -38,16 +38,17 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
     // the last pre-disconnect message, not a just-arrived frame at the head.
     const anchor=recoveryAnchors.get(id);
     recover ||= Boolean(anchor);
-    const ticket=epoch,known=new Set(anchor?[anchor]:(state.messages[id]??[]).map(m=>m.id));
+    const ticket=epoch,roomRevision=roomRevisions.get(id),known=new Set(anchor?[anchor]:(state.messages[id]??[]).map(m=>m.id));
+    const current=()=>valid(ticket)&&roomRevision===roomRevisions.get(id)&&state.conversations.some(c=>c.id===id&&allowed(c));
     const task=Promise.resolve().then(async()=>{
-      if(!valid(ticket))return;
+      if(!current())return;
       state={...state,history:{...state.history,[id]:{...state.history[id],loading:true,error:''}}};emit();
       try {
         let before=older?state.messages[id]?.[0]?.id:undefined,hasMore=false;
         do {
           const limit=Number.isInteger(config.chat?.historyLimit)&&config.chat.historyLimit>0?Math.min(100,config.chat.historyLimit):50;
           const page=await client.listMessages(id,{...(before?{before}:{}),limit});
-          if(!valid(ticket)||!state.conversations.some(c=>c.id===id&&allowed(c)))return;
+          if(!current())return;
           if(!Array.isArray(page.messages)||typeof page.hasMore!=='boolean')throw fault('Invalid Realtime history.');
           const batch=page.messages.map(messageDTO);merge(id,batch);hasMore=page.hasMore;
           const reached=known.size&&batch.some(m=>known.has(m.id));
@@ -55,12 +56,12 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
           if(!recover||older||!known.size||reached||!hasMore||!next||next===before)break;
           before=next;
         }while(valid(ticket));
-        if(!valid(ticket))return;
+        if(!current())return;
         recoveryAnchors.delete(id);
         state={...state,history:{...state.history,[id]:{loading:false,error:'',hasMore:older||!known.size?hasMore:state.history[id]?.hasMore??hasMore,loaded:true}}};
         read();emit();
       }catch(error){
-        if(!valid(ticket))return;
+        if(!current())return;
         if(error.code==='not_member')remove(id);
         state={...state,history:{...state.history,[id]:{...state.history[id],loading:false,error:error.message}},error:error.message};emit();
       }
@@ -72,6 +73,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
     if(last&&socket?.readyState===1&&state.status==='connected')socket.send(JSON.stringify({type:'conversation.read',data:{conversationId:current.id,lastMessageId:last.id}}));
   }
   function remove(id) {
+    roomRevisions.set(id,(roomRevisions.get(id)??0)+1);loading.delete(id);
     recoveryAnchors.delete(id);
     const messages={...state.messages},histories={...state.history};delete messages[id];delete histories[id];
     state={...state,conversations:state.conversations.filter(c=>c.id!==id),messages,history:histories};
@@ -84,7 +86,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
       const raw=await client.listConversations();if(!valid(ticket))return;
       if(revision!==listRevision)return; // An event/read already replaced this snapshot.
       if(!Array.isArray(raw.conversations))throw fault('Invalid Realtime conversation list.');
-      const conversations=raw.conversations.map(conversationDTO);
+      const conversations=raw.conversations.map(conversationDTO).filter(c=>c.kind!=='clan'||!revokedClans.has(c.clanId));
       const ids=new Set(conversations.map(c=>c.id));for(const id of Object.keys(state.messages))if(!ids.has(id))remove(id);
       state={...state,conversations,error:'',listLoading:false};emit();
       const current=room(selectedKey);if(current)await history(current.id,{recover:true});
@@ -145,7 +147,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
             emit();item.reject(fault(state.error,d.code));
           }else if(frame.type==='conversation.added'||frame.type==='conversation.removed'){
             listRevision++;if(frame.type==='conversation.removed')remove(d.conversationId);
-            else{const c=conversationDTO(d.conversation);state={...state,conversations:[...state.conversations.filter(old=>old.id!==c.id),c]};}
+            else{const c=conversationDTO(d.conversation);if(c.kind==='clan'&&revokedClans.has(c.clanId))return;state={...state,conversations:[...state.conversations.filter(old=>old.id!==c.id),c]};}
             emit();void refresh();
           }else if(frame.type==='presence.update'){
             if(!['online','offline'].includes(d.status))return;
@@ -158,10 +160,17 @@ export function createChatController({client,onChange,onNotification=()=>{},onCo
   }
   return {
     configure(next,nextClanId) {
-      config=next;const changedClan=clanId!==nextClanId;clanId=nextClanId;
+      config=next;const changedClan=clanId!==nextClanId,previousClan=clanId;clanId=nextClanId;
+      if(changedClan&&previousClan){
+        revokedClans.add(previousClan);listRevision++;
+        for(const c of [...state.conversations])if(c.kind==='clan'&&c.clanId===previousClan)remove(c.id);
+        if(selectedKey==='clan')selectedKey=null;
+        emit();
+      }
+      if(nextClanId)revokedClans.delete(nextClanId);
       const nextEnabled=Boolean(client&&config.chat?.enabled===true&&(config.chat.directMessages===true||config.chat.clanChat===true&&config.clan?.enabled===true));
       if(enabled!==nextEnabled){enabled=nextEnabled;if(enabled)void connect();else{stop();recoveryAnchors.clear();state={...state,status:'unavailable',conversations:[],messages:{},history:{},blocked:{}};emit();}}
-      else if(enabled&&changedClan){const current=room(selectedKey);if(current)void history(current.id);}
+      else if(enabled&&changedClan){const current=room(selectedKey);if(current)void history(current.id);if(previousClan)void refresh();}
     },
     select(key) {const changed=selectedKey!==key;selectedKey=key;const current=room(key);if(current&&(changed||!state.history[current.id]?.loaded))void history(current.id);},
     resolve:key=>room(key),

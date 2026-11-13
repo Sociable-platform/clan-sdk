@@ -34,7 +34,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       status.setAttribute('aria-live', 'polite');
       content.append(status);
     }
-    let message = state.error || state.joinError || '';
+    let message = state.leavePending?'Leaving clan…':state.leaveError || state.error || state.joinError || '';
     if (data.tab === 'friends') {
       const friends=state.friends;
       message=friends?.error||friends?.actionError||friends?.searchError||'';
@@ -115,7 +115,10 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     // Display configuration cannot grant permission or enable an absent API.
     shadow.querySelectorAll('button').forEach(button => {
       const label = button.getAttribute('aria-label') ?? button.textContent;
-      if ([labels.leave, labels.leaveShort].includes(label) || /^(Promote|Demote|Kick)/.test(label)) {
+      if ([labels.leave, labels.leaveShort].includes(label)) {
+        button.disabled=Boolean(state.leavePending||state.profilePending||!data.clan);
+        button.title=state.leavePending?'Leaving clan…':'';
+      } else if (/^(Promote|Demote|Kick)/.test(label)) {
         button.disabled = true;
         button.title = 'Backend operation unavailable';
       }

@@ -10,7 +10,7 @@ export function decorateChat(shadow,data) {
   const input=shadow.querySelector('[data-key="message"]');
   const button=shadow.querySelector('.sk-composer button');
   if(button){button.disabled=!ready||!input?.value.trim();button.title=ready?'Send message':'Messaging unavailable';}
-  let message=state?.error||history?.error||state?.warning||'';
+  let message=(data.tab==='clan'&&(data.sdkState?.leavePending?'Leaving clan…':data.sdkState?.leaveError))||state?.error||history?.error||state?.warning||'';
   if(!message)message=!state||state.status==='unavailable'?'Messaging is unavailable until transport is connected.':state.status==='connecting'?'Connecting to chat…':state.status!=='connected'?'Chat disconnected.':state.listLoading?'Loading conversations…':history?.loading?'Loading messages…':key&&!room?'No chat conversation is available for this clan.':!state.conversations.length?'No conversations yet.':room&&!data.threads?.[key]?.length?'No messages yet.':'';
   const status=shadow.querySelector('[data-sdk-status]');
   if(status){

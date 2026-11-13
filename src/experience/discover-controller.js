@@ -55,6 +55,7 @@ export function createDiscoverController({ listClans, joinClan, clanAdapter, onC
     emit();
   }
   return {
+    reset() { invalidate();visit++;enabled=false;state={screen:'create',query:'',status:'idle',clans:[],error:'',joinError:'',pendingJoin:null,joinedClanId:null};emit(); },
     start: load,
     retry: load,
     setEnabled(next) {

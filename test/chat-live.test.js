@@ -8,6 +8,15 @@ const me='7f1e0c2a-5b3d-4e8f-9a10-2b3c4d5e6f70',peer='5a2b3c4d-1e2f-4a3b-8c9d-0e
 const conversation={id,kind:'dm',clanId:null,members:[{id:me,name:'Ali',online:true},{id:peer,name:'Rashad',online:false}],lastMessage:null,unread:0};
 const message=(n=1)=>({id:`message-${n}`,senderId:peer,senderName:'Rashad',body:'gg',createdAt:`2026-11-09T18:20:${String(n).padStart(2,'0')}Z`});
 const cfg={clan:{enabled:true},chat:{enabled:true,directMessages:true,clanChat:true,maxMessageLength:300}};
+
+test('leaving removes clan room and late history/events while retaining DM and socket',async t=>{
+ const clanRoom={...conversation,id:'clan-room',kind:'clan',clanId:'clan'};
+ const pending=deferred();const f=setup(t,{listConversations:async()=>({conversations:[conversation,clanRoom]}),listMessages:room=>room===clanRoom.id?pending.promise:Promise.resolve({messages:[message()],hasMore:false})});
+ f.controller.configure(cfg,'clan');await tick();f.hello();await tick();f.controller.select(peer);await tick();f.controller.select('clan');await tick();
+ f.controller.configure(cfg,null);pending.resolve({messages:[message(2)],hasMore:false});await tick();await f.controller.refresh();
+ f.sockets[0].frame('conversation.added',{conversation:clanRoom});f.sockets[0].frame('message.new',{conversationId:clanRoom.id,message:message(3)});
+ assert.equal(f.sockets.length,1);assert.equal(f.state().status,'connected');assert.equal(f.state().messages[clanRoom.id],undefined);assert.equal(f.state().history[clanRoom.id],undefined);assert.equal(f.state().messages[id].length,1);assert.equal(f.controller.resolve('clan'),undefined);assert.ok(f.controller.resolve(peer));
+});
 const tick=()=>new Promise(done=>setTimeout(done,0));
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 function setup(t,extra={}) {

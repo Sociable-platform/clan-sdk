@@ -13,6 +13,7 @@ const clients = new WeakMap();
 // Prototype methods allow additive widget capabilities without changing the
 // existing five own Social operations. Construction/import never touches the DOM.
 class SDK {
+  leaveClan(clanId) { return clients.get(this).leaveClan(clanId); }
   listConversations() { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listConversations(); }
   listMessages(id,options) { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listMessages(id,options); }
   getMyPlayer() { return clients.get(this).friends.getMyPlayer(); }

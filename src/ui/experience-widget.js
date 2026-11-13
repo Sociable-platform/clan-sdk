@@ -30,7 +30,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:state?.members??[],messages:view.messages,
       friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
-      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),acceptRequest:id=>friendActions.action('accept',id)}};
+      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id)}};
   }
   const render=()=>renderer.update(current,data());
   const defaultTab=()=>current.clan?.enabled===true?'clan':current.friends?.enabled===true?'friends':'chat';
