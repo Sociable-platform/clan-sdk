@@ -1,0 +1,11 @@
+import {init} from '../../src/index.js';
+const role=new URL(location.href).searchParams.get('player')??'A';
+document.querySelector('#title').textContent='Live SDK chat — player '+role;
+const response=await fetch(new URL('./fixtures/platform-widget-v1.json',import.meta.url));const config=(await response.json()).config;
+config.clan.enabled=false;config.friends.enabled=false;config.chat.enabled=true;config.chat.directMessages=true;config.chat.clanChat=false;config.layout.startCollapsed=false;
+const tokenBase=new URL(location.href).searchParams.get('tokenBase')??location.origin;
+const sdk=init({socialUrl:'http://localhost:8082',realtimeUrl:'http://localhost:8083',getPlayerToken:async()=>{const response=await fetch(tokenBase+'/__live__/chat-token?player='+role,{cache:'no-store'});if(!response.ok)throw new Error('Live test token unavailable');return (await response.json()).token;}});
+const widget=sdk.mountExperience({container:document.querySelector('#widget'),config});
+document.querySelector('#result').textContent='Mounted live SDK; it owns connection, conversation/history loading, send and receive. Each tab has its own authenticated SDK session.';
+document.querySelector('#destroy').addEventListener('click',()=>{widget.destroy();document.querySelector('#result').textContent='Destroyed; connection and SDK DOM removed.';});
+window.addEventListener('pagehide',()=>widget.destroy(),{once:true});

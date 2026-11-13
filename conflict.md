@@ -396,3 +396,55 @@ Social verification with2 dedicated players passed8 groups, including cleanup.
 Node-only dev signing never logs/shares keys or tokens. Dedicated player records
 remain; no unrelated player data modified. No live browser CORS, token-exchange,
 websocket or deployment-SHA claim. Backend/frontend/game source unchanged, no push.
+
+## 2026-11-12 — Live chat integration
+
+Inspected/fetched backend develop@c5a571ed7ca1fcdc7fde46ba99c573eae9ce4bad;
+supplied frontend detached@b91b8bfd9c578e76a8ec544c8f4c7d321e4d6e8e and fetched
+actual frontend develop@83366c63e3d8784168dd2aedd1b4b05681c2c236. Source/default
+HEAD distinctions and verification are in
+[docs/live-chat-integration.md](docs/live-chat-integration.md). No Git merge
+attempt was made or claimed clean.
+
+**Resolved SDK mismatch:** previous shared UI binding disabled all composers
+and supplied empty threads despite completed backend DM contracts. SDK now uses
+real conversation UUIDs/history/frames with the existing token coordinator;
+`src/chat/controller.js` owns connection/state and `src/chat/view.js` adapts data.
+No game-side transport or second visual implementation was added.
+
+**Shared UI integration mismatch, bridged within SDK:**
+`packages/ui/src/components/thread.js::composer` and `render.js::sendMessage`
+are synchronous, clearing a draft immediately, whereas real sends can fail or
+have unknown delivery. SDK's `shared-renderer.js` capture handler retains the
+draft until correlated ACK, and `chat-controls.js` binds pending/error/retry
+availability to existing classes. Supported config, visuals and dashboard API
+remain unchanged. Chat components are identical in latest frontend develop.
+The recommended future fix is explicit shared async composer/status/action
+inputs, implemented collaboratively in @clan/ui, followed by removal of hooks.
+Selectors avoid a permanent UI fork now but depend on stable shared markup;
+copying a Chat screen would create drift and is not recommended. Frontend owns
+the shared-package change; individual/team-member assignment unconfirmed.
+
+**Confirmed dependencies, not SDK contract conflicts:**
+
+- Clan-room provisioning/membership events are explicitly unfinished in
+  `openapi/realtime-ws.md` and `services/realtime/internal/consumer/dispatch.go`.
+  Backend must implement them before live clan chat can pass. SDK consumes real
+  returned clan rooms under config/membership checks, with no synthetic IDs or
+  endpoint. This task's real DM integration is not blocked. Ownership of the
+  specific backend work is unconfirmed.
+- Harvest Village `backend/src/app.ts::createApp` permits only self/Social in
+  CSP connect-src. Its existing production hosting policy needs public Platform/
+  Realtime HTTP and WS origins before deployed chat can work. Local Vite passed;
+  backend source unchanged. Recommend exact configured origins rather than a
+  wildcard. Hosting owner unconfirmed; deployment is outside this task.
+- The supplied shared package is pinned older than latest non-chat UI. New
+  Friends/badge/member changes and registry publication require a separate
+  compatible package update; no shared source was silently replaced here.
+
+Automated245 SDK unit/78 browser tests and25 game frontend tests pass; canonical
+SDK/game production bundle builds. Real A/B DM immediate delivery, reload history,
+offline recipient history recovery and destroy were verified in two independent
+authenticated browser tabs (one profile), then only dedicated pair friendships
+were cleaned. Expiry/policy failure paths are mocked, not claimed live. No change
+to Social/Realtime contracts, shared schema, backend source or secret handling.

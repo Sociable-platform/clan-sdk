@@ -2,8 +2,7 @@ import { ApiError } from './errors.js';
 import {createTokenAcquisition} from './token.js';
 
 /** Internal HTTP boundary shared by clan, player and Friends operations. */
-export function createRequest(socialUrl, getPlayerToken, session) {
-  const acquire = createTokenAcquisition(getPlayerToken, session);
+export function createRequest(socialUrl, getPlayerToken, session, acquire = createTokenAcquisition(getPlayerToken, session)) {
   return async function request(path, { method = 'GET', body } = {}) {
     const ticket = session?.capture();
     const serializedBody = body === undefined ? undefined : JSON.stringify(body);

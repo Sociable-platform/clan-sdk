@@ -16,7 +16,8 @@ try {
   if(!health.ok)throw Object.assign(new Error(),{code:'service_not_ready'});
   let tokens;
   if(process.argv.includes('--local-dev-key')) {
-    const key=createPrivateKey(await readFile(new URL('../../clan-backend/secrets/platform_jwt_private.pem',import.meta.url)));
+    if(!process.env.FRIENDS_LIVE_DEV_KEY)throw Object.assign(new Error(),{code:'friends_live_dev_key_path_required'});
+    const key=createPrivateKey(await readFile(process.env.FRIENDS_LIVE_DEV_KEY));
     const game=randomUUID(),tag='sdk-friends-test-'+randomUUID(),now=Math.floor(Date.now()/1000);
     const token=(suffix)=>{const head=Buffer.from(JSON.stringify({alg:'EdDSA',typ:'JWT'})).toString('base64url');const claims=Buffer.from(JSON.stringify({sub:tag+'-'+suffix,gid:game,name:'SDK Friends Test '+suffix,typ:'player',iat:now,exp:now+600})).toString('base64url');const input=head+'.'+claims;return input+'.'+sign(null,Buffer.from(input),key).toString('base64url');};
     tokens=[token('A'),token('B')];

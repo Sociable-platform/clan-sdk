@@ -15,6 +15,7 @@ export function mountPlatformExperience(sdk, load, {container, signal, clanAdapt
   let destroyed = false;
   let revision = 0;
   let pending;
+  let configTimer;
   let reserved = true;
   reserveContainer(container);
   const cleanupInitialSignal = () => signal?.removeEventListener('abort',cancelInitial);
@@ -52,17 +53,23 @@ export function mountPlatformExperience(sdk, load, {container, signal, clanAdapt
   function destroy() {
     if (destroyed) return;
     destroyed = true;
-    invalidate(); cleanupInitialSignal();
+    invalidate(); cleanupInitialSignal();clearTimeout(configTimer);container.removeEventListener('clan-sdk:config-updated',configUpdated);
     widget?.destroy();
     if (reserved) { releaseContainer(container); reserved = false; }
   }
   function cancelInitial() { destroy(); }
+  function configUpdated(event) {
+    if(destroyed||!Number.isSafeInteger(event.detail?.version)||event.detail.version<1)return;
+    clearTimeout(configTimer);configTimer=setTimeout(()=>{if(!destroyed)void refreshConfig().catch(()=>{});},Math.random()*500);
+  }
+  container.addEventListener('clan-sdk:config-updated',configUpdated);
   signal?.addEventListener('abort',cancelInitial,{once:true});
   const ready = refreshConfig();
   // Destroying an initial load should not create an unhandled host-page rejection.
   ready.then(cleanupInitialSignal,cleanupInitialSignal);
   return {
     ready, refreshConfig, destroy,
+    reconnectChat() { requireActive();if(!widget)throw new Error('Wait for widget.ready before reconnecting.');widget.reconnectChat(); },
     refreshFriends() {
       requireActive();
       if (!widget) throw new Error('Wait for widget.ready before refreshing friends.');

@@ -1,10 +1,11 @@
 import {render, buildLabels} from '@clan/ui';
 import {widgetFonts} from './fonts.js';
 import {decorateFriends} from './friends-controls.js';
+import {decorateChat,selectedChatKey} from './chat-controls.js';
 
 // Same source components/styles as dashboard preview. These small runtime hooks
 // bridge missing shared-package inputs; they never fetch/authenticate or invent data.
-export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, live = true} = {}) {
+export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),live = true} = {}) {
   let handle, shadow, observer;
   let data = {}, config = {}, destroyed = false;
   const doc = container.ownerDocument;
@@ -21,7 +22,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       if (online) online.hidden = true;
       const name=data.player?.name??'Player';
       setText(header.querySelector('.sk-status'), data.role ? `${name} · ${data.role}`
-        : state.friends?.player ? name : state.membershipKnown ? 'Player · no clan' : 'Not connected');
+        : state.friends?.player || state.chat?.status==='connected' ? name : state.membershipKnown ? 'Player · no clan' : 'Not connected');
     }
     const content = shadow.querySelector('.sk-content');
     if (!content) return;
@@ -33,7 +34,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       status.setAttribute('aria-live', 'polite');
       content.append(status);
     }
-    let message = state.error || state.joinError || '';
+    let message = state.leavePending?'Leaving clan…':state.leaveError || state.error || state.joinError || '';
     if (data.tab === 'friends') {
       const friends=state.friends;
       message=friends?.error||friends?.actionError||friends?.searchError||'';
@@ -41,13 +42,13 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         ?friends.searchStatus==='loading'?'Searching players…':friends.searchStatus==='empty'?'No players found.':''
         :friends?.status==='ready'&&!friends.friends.length&&!friends.incoming.length&&!friends.outgoing.length?'No friends or requests yet.':'';
     }
-    else if (data.tab === 'chat' || data.screen === 'home') message ||= 'Messaging is unavailable until transport is connected.';
+    else if (data.tab === 'chat' || data.screen === 'home') message = null;
     else if (state.profilePending || state.status === 'loading' && data.screen === 'discover') message ||= 'Loading clans…';
     else if (data.screen === 'discover' && state.status === 'empty') message ||= 'No clans found.';
     if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : 'Only the clan name is supported by the current Social API.';
     // Child-list observation also catches the shared launcher's internal repaints.
     // Only write changed text; unconditional replaceChildren would loop forever.
-    if (status.firstChild?.textContent !== message) {
+    if (message!==null && status.firstChild?.textContent !== message) {
       const text = doc.createElement('span');
       text.textContent = message;
       status.replaceChildren(text);
@@ -114,12 +115,28 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     // Display configuration cannot grant permission or enable an absent API.
     shadow.querySelectorAll('button').forEach(button => {
       const label = button.getAttribute('aria-label') ?? button.textContent;
-      if ([labels.leave, labels.leaveShort].includes(label) || /^(Promote|Demote|Kick)/.test(label)) {
+      if ([labels.leave, labels.leaveShort].includes(label)) {
+        button.disabled=Boolean(state.leavePending||state.profilePending||!data.clan);
+        button.title=state.leavePending?'Leaving clan…':'';
+      } else if (/^(Promote|Demote|Kick)/.test(label)) {
         button.disabled = true;
         button.title = 'Backend operation unavailable';
       }
     });
     if(data.tab==='friends')decorateFriends(shadow,data,labels);
+    if(data.tab==='chat'||data.tab==='clan'&&data.screen==='home')onChatSelect(decorateChat(shadow,data));
+    else onChatSelect(null);
+  }
+  function send() {
+    if(!live||destroyed)return;
+    const key=selectedChatKey(shadow,data),input=shadow.querySelector('[data-key="message"]'),value=input?.value;
+    if(!key||!value?.trim()||shadow.querySelector('.sk-composer button')?.disabled)return;
+    const submitted=data.chatRooms?.[key];
+    Promise.resolve(onChatSend(key,value)).then(()=>{
+      if(destroyed||selectedChatKey(shadow,data)!==key||data.chatRooms?.[key]!==submitted)return;
+      const current=shadow.querySelector('[data-key="message"]');
+      if(current?.value===value){current.value='';current.dispatchEvent(new doc.defaultView.Event('input',{bubbles:true}));}
+    },()=>{}); // Controller renders failure and retains the original draft.
   }
   const click = event => {
     const friend=event.target.closest?.('[data-friend-action]');
@@ -127,12 +144,12 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     if(event.target.closest?.('[data-friend-refresh]')){onFriendRefresh();return;}
     if (event.target.closest?.('[data-sdk-retry]')) {if(data.tab==='friends')onFriendRefresh();else onRetry();}
     if (event.target.closest?.('.sk-composer button')) {
-      event.preventDefault(); event.stopImmediatePropagation();
+      if(live){event.preventDefault(); event.stopImmediatePropagation();send();}
     }
   };
   const key = event => {
     if (event.key === 'Enter' && event.target.matches?.('[data-key="message"]')) {
-      event.preventDefault(); event.stopImmediatePropagation();
+      if(live){event.preventDefault(); event.stopImmediatePropagation();send();}
     }
   };
   const input = event => {
@@ -144,6 +161,8 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     update(nextConfig, nextData) {
       if (destroyed) return;
       const active = shadow?.activeElement;
+      const scroller=shadow?.querySelector('[data-key="content"]');
+      const follow=scroller&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<32;
       const selection = active?.dataset.key && typeof active.selectionStart === 'number'
         ? {key:active.dataset.key, start:active.selectionStart, end:active.selectionEnd, direction:active.selectionDirection} : null;
       config = nextConfig; data = nextData; fonts.update(config);
@@ -161,6 +180,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         observer.observe(shadow, {childList:true, subtree:true});
       } else handle.update(config, data);
       decorate();
+      if(follow){const next=shadow.querySelector('[data-key="content"]');if(next)next.scrollTop=next.scrollHeight;}
       if (selection) {
         const input = [...shadow.querySelectorAll('[data-key]')].find(node => node.dataset.key === selection.key);
         if (input && shadow.activeElement === input) input.setSelectionRange(selection.start, selection.end, selection.direction);

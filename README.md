@@ -1,10 +1,36 @@
 # Clan SDK
 
-Plain JavaScript ESM Social client and widget lifecycle. The SDK and dashboard now render the **same `@clan/ui` package**, provided in `clan-frontend/packages/ui`. No dashboard app, React runtime, router or editor panels are imported. Frontend source is read-only; there is no second widget component/style copy in this SDK.
+Plain JavaScript ESM Social client and widget lifecycle. The SDK and dashboard render the **same `@clan/ui` package**, installed from the Clan GitLab npm registry. No dashboard app, React runtime, router, editor panels or source checkout is required. The SDK does not maintain a second widget component/style copy.
 
 ## Install and verify
 
-Node 22 or newer; keep the supplied frontend checkout at `clan-frontend`:
+Node 22 or newer. The `.npmrc` next to `package.json` contains exactly:
+
+```ini
+@clan:registry=https://gitlab.com/api/v4/groups/146782114/-/packages/npm/
+//gitlab.com/api/v4/groups/146782114/-/packages/npm/:_authToken=${GITLAB_NPM_TOKEN}
+```
+
+Keep that placeholder literal. Set `GITLAB_NPM_TOKEN` in the environment of the
+terminal running npm. Use a **read-only group deploy token** with
+`read_package_registry` permission and access to the package. No publish/write
+permission is needed. This installation credential is separate from the game's
+secret API key and the player's runtime token; never put it in browser code,
+configuration JSON, a `VITE_` variable or a committed file.
+
+Windows PowerShell (masked local prompt, token used only by this shell):
+
+```powershell
+$registrySecret = Read-Host 'GitLab read-only deploy token' -AsSecureString
+$env:GITLAB_NPM_TOKEN = [System.Net.NetworkCredential]::new('', $registrySecret).Password
+npm ci
+npm test
+# When finished with npm in this shell:
+Remove-Item Env:\GITLAB_NPM_TOKEN
+Remove-Variable registrySecret
+```
+
+Other shells can export an existing secret environment variable before running:
 
 ```sh
 npm ci
@@ -12,7 +38,28 @@ npm test
 npm run test:browser
 ```
 
-Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. There is no build script. `src/index.js` is the ESM entrypoint. The root package is private; `@clan/ui` is a local file dependency linked to the canonical frontend source. A separately published/versioned shared package is still a release dependency. Do not distribute an SDK package that leaves that file dependency unresolved.
+`npm ci` installs the exact version in `package-lock.json`; it does not select a
+new release just because `^0.1.0` allows one. To adopt a newer compatible release:
+
+```sh
+npm update @clan/ui
+npm test
+npm run test:browser
+```
+
+Include the resulting changed `package-lock.json` with every dependency update.
+Do not substitute `file:` links or copied repositories. No SDK bundle/CDN build
+is introduced here. The lockfile currently resolves registry release **0.1.1**.
+See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
+
+Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. The server resolves the installed package's public export and serves its relative modules/styles/assets, without assuming a source directory layout. It prints the installed version at startup. There is no build script; `src/index.js` is the ESM entrypoint.
+
+CI: no installation pipeline file was found in this SDK checkout. Configure
+`GITLAB_NPM_TOKEN` as a **masked secret CI/CD variable** in GitLab (protected where
+appropriate for your branch policy), using the read-only deploy token above.
+An install job should run `npm ci` followed by `npm test`, after the generated
+lockfile is committed. Do not echo the variable or enable shell tracing around
+credentials. No CI pipeline was run or claimed passing for this migration.
 
 `npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock. Actual current results are in [shared renderer notes](docs/shared-renderer.md).
 
@@ -27,7 +74,8 @@ const sdk = init({
   gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
   platformUrl: 'http://localhost:8081',
   socialUrl: 'http://localhost:8082',
-  getPlayerToken: async () => obtainPlayerTokenFromGameServer(),
+  realtimeUrl: 'http://localhost:8083', // HTTP(S) base; SDK derives ws/wss
+  getPlayerToken: async ({forceRefresh}) => obtainPlayerTokenFromGameServer({forceRefresh}),
 });
 
 const container = document.querySelector('#social-widget');
@@ -61,7 +109,7 @@ ETag: "v1"
 
 This is the inspected W6 route, not a guessed dashboard/authenticated route. Config requests use `credentials:'omit'`, no Authorization, no API key and no Social token callback. The loader unwraps `config`. Per the user's existing policy, **published config payloads are not SDK-schema-validated**. JSON/W6 envelope checks remain; the shared renderer safely selects supported fields. An unrenderable payload uses the render error boundary. Direct caller updates have minimal type/appearance checks before replacing working UI.
 
-The current document has `schemaVersion:1`, `game_id`, `theme.colors/fonts/frame/buttons/panel/textures/components`, `layout`, `friends`, `clan.screens`, `chat`, and `texts`. It has no prototype `kind` or root `screens`. See the frontend [schema](clan-frontend/docs/config-v1/config.v1.schema.json), [examples](clan-frontend/docs/config-v1/examples) and [SDK regression fixture](test/browser/fixtures/platform-widget-v1.json). The SDK passes the full document to `@clan/ui`; it no longer converts current JSON into old Discover sections.
+The current document has `schemaVersion:1`, `game_id`, `theme.colors/fonts/frame/buttons/panel/textures/components`, `layout`, `friends`, `clan.screens`, `chat`, and `texts`. It has no prototype `kind` or root `screens`. See the self-contained [SDK regression fixture](test/browser/fixtures/platform-widget-v1.json). The SDK passes the full document to `@clan/ui`; it no longer converts current JSON into old Discover sections.
 
 The config is retained across internal screen/tab navigation. Navigation never refetches config or changes the game's URL. Each view reads the same theme and its own `clan.screens` settings. No config loading is duplicated in the game.
 
@@ -119,7 +167,7 @@ Curated Google font families use the same `googleFontsHref` as dashboard preview
 | `clan.screens.home.showStats` | Shared Home details; SDK suppresses unsupported live level/XP data |
 | `texts.terms/labels` | Shared label overrides and `{Clan}`/`{clan}`/`{Clans}`/`{clans}` substitution |
 | Ordered `clan.badges.allowed` / `clan.roles` | Shared picker/role presentation order; runtime permission authority remains backend |
-| Chat layout/limits | Shared display only. No chat delivery, profanity enforcement or slow-mode enforcement is claimed |
+| Chat layout/limits | Shared bubbles/log/composer; live Realtime integration below. Server enforces filtering, permissions and slow mode |
 
 There is **no generic screen/section/tab order field** in the current schema. Old prototype section arrays/hero layouts are not a second design system. Unknown fields remain in config; the renderer only consumes its supported fields. Minimal direct checks are not a full copy of the frontend's proposed strict JSON Schema validator and do not enforce permissions.
 
@@ -130,7 +178,7 @@ Live runtime flow:
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
 4. Create uses the supplied shared form and **only `{name}`** with `createClan`. Badge/tag/description controls are disabled in live mode because the backend doesn't accept them. Duplicate writes are guarded. Server errors remain visible; success refreshes membership.
 5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
-6. Friends and incoming/outgoing requests use the confirmed Friends API described below. Chat messages/threads remain empty without transport; Send/Enter preserve unavailable drafts. Leave/kick/promote/demote remain unwired in this SDK and disabled. Config cannot grant backend permissions.
+6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave is integrated as described below; kick/promote/demote remain disabled. Config cannot grant backend permissions.
 
 The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
 
@@ -170,7 +218,7 @@ Search requires nonblank q (1–50 characters after server trimming), optional i
 
 The UI loads only when `friends.enabled === true` and Friends opens. It uses shared `@clan/ui` rows/search/Accept and shared button styles. SDK bindings add Add/Decline/Cancel/Remove/Refresh controls to those existing rows, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
 
-The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. Backend RabbitMQ/Realtime friend notifications now exist, but this SDK has no realtime transport, so none is invented or partially opened here. Chat and presence remain unavailable.
+The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. When the live chat Realtime connection is enabled, friend notifications also request a refetch; otherwise explicit refresh remains available. Real conversation presence comes from Realtime, never preview data.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.
 
@@ -181,7 +229,7 @@ sdk.resetPlayerSession();
 
 Verification: **225 Node tests**, **70 real-browser mock tests**, and **8 live PASS groups** against local Social with two isolated dedicated test players (includes relationship cleanup). No FAIL/BLOCKED live operations in that run. This verifies the HTTP SDK against the running service, not its deployed SHA, browser CORS, Platform token exchange or websocket delivery. The Node-only runner used the existing local development signing key in memory and logged no tokens; dedicated player records remain, relationships were removed. See [Friends report](docs/friends-integration.md) for exact source revisions, limitations and changed files.
 
-Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-in**, never part of npm test: `node test/live/friends.js --local-dev-key` for the supplied local backend/key. Alternatively provide `FRIENDS_LIVE_SOCIAL_URL`, `FRIENDS_LIVE_DEDICATED=1`, `FRIENDS_LIVE_TOKEN_A/B` as environment variables for two dedicated players whose external IDs start with `sdk-friends-test-`; run without the flag. Tokens are never printed. Do not use real player accounts for this destructive relationship lifecycle test.
+Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-in**, never part of npm test: `node test/live/friends.js --local-dev-key` requires an explicitly supplied `FRIENDS_LIVE_DEV_KEY` external development signing-key path. Alternatively provide `FRIENDS_LIVE_SOCIAL_URL`, `FRIENDS_LIVE_DEDICATED=1`, `FRIENDS_LIVE_TOKEN_A/B` as environment variables for two dedicated players whose external IDs start with `sdk-friends-test-`; run without the flag. The opt-in live Chat fixture requires `LIVE_CHAT_DEV_KEY` and running development services. No backend checkout or development key is needed for SDK installation, normal tests or preview. Tokens and keys are never printed. Do not use real player accounts for this relationship lifecycle test.
 
 Host events bubble from the widget: `clan-sdk:navigate` (`screen`, `previousScreen`), `clan-sdk:tab` (`tab`), `clan-sdk:joined`/`created` (`clanId`). The SDK performs the confirmed actions itself.
 
@@ -220,7 +268,7 @@ Run `npm run preview` (same server as browser tests), then:
 - `?mode=mock` explicitly opts that page into a development-only Social route prefix with fabricated data. This mock supports membership/list/join; other operations report unsupported.
 - [Legacy remote Chat API preview](http://127.0.0.1:5174/preview/): bare legacy config HTTP mock and refresh; kept only for compatibility testing.
 
-The requested editor URL is reachable but redirects to login in the available browser session. Full authenticated-editor visual verification is unavailable. Source inspection, 272 frontend shared/schema tests, SDK parity assertions and the comparison page establish the checked subset; they do not claim live backend/transport/game integration. The demo game is explicitly out of scope.
+The earlier editor check redirected to login; authenticated-editor visual verification remains unavailable. The earlier272 frontend/shared-schema tests and comparison page verify the supplied shared UI subset. The later live chat verification and minimal Harvest connection-settings change are recorded separately below.
 
 ## Player token callback and coordination
 
@@ -241,3 +289,91 @@ refresh bypasses that cache and supersedes older pending acquisition. Auth
 transitions clear the cache at both boundaries and block acquisition in between.
 See [token optimization report](docs/token-optimization.md) for game integration,
 source selection and actual test/build results.
+
+## Live chat
+
+`mountExperience` now connects the existing shared Chat and clan-chat components
+to Realtime when `realtimeUrl` and the published chat switches enable it. Omit
+that option to retain explicit unavailable messaging. Legacy chat-only mount APIs
+retain their previous behavior. `init` remains free of network requests.
+
+The SDK acquires the same player token as Social, opens `/api/v1/ws?token=…`,
+waits for authenticated `hello`, then reads `GET /api/v1/conversations` and the
+selected conversation's `/messages` history. HTTP uses Bearer auth and the
+existing one-401 retry. Socket token expiry requests `forceRefresh:true` through
+that same acquisition coordinator. Never log the WebSocket URL; use HTTPS/WSS
+outside local development. Configure Realtime's allowed browser origins and the
+host page's CSP `connect-src` for both HTTP(S) and WS(S) service origins.
+
+Public read methods return successful backend JSON unchanged:
+
+```js
+const {conversations} = await sdk.listConversations();
+const {messages, hasMore} = await sdk.listMessages(conversations[0].id, {
+  limit: 20, // 1–100, default 50
+  // before: oldestMessageId, // older page, newest first on the wire
+});
+```
+
+The widget owns selection, history, send and receive; the game needs no message
+handlers. It sends `message.send` using the **returned conversation ID**, clears
+the draft only after ACK, and displays final stored text from `message.new` or
+history. Pending/error/disconnected/empty states use the shared renderer without
+SDK-injected Refresh, Reconnect or Load earlier buttons. Hosts can explicitly
+reconnect through `widget.reconnectChat()`. Unknown delivery is never replayed
+automatically. Reconnect reloads membership/history, pages back to the last known
+message, merges incoming frames and deduplicates by message ID. The initial page
+uses `chat.historyLimit` capped at the backend maximum100, default50 if absent.
+
+DM rooms are provisioned by the backend after friendship acceptance. Opening a
+socket never creates a room. **Clan room provisioning is still absent in the
+inspected backend**: SDK supports actual returned clan rooms with matching
+membership/config, but does not invent a conversation ID or promise clan E2E.
+
+`widget.destroy()` closes the socket, detaches listeners and cancels timers;
+pending responses cannot repaint. For logout destroy first, then clear the host
+token cache and call `sdk.resetPlayerSession()`. For account switching update the
+callback's identity source and reset synchronously, or recreate the SDK. Widgets
+on that SDK reset their data/drafts and reconnect for the new identity. Token
+rotation alone cannot identify an account switch.
+
+`config.updated` and positive `hello.configVersion` emit
+`clan-sdk:config-updated` (`{version}`). Platform-mounted handles refresh through
+the existing public loader/cache after0–500ms jitter, with teardown/stale guards;
+direct-config hosts may handle this event themselves. No polling is added.
+
+See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
+changed files, automated results, the real two-player browser check and its limits.
+
+## Leave clan (TEAM-214)
+
+```js
+await sdk.leaveClan(clanId);
+```
+
+Bodyless POST `/api/v1/clans/{encodedClanId}/leave`, Bearer player auth through
+getPlayerToken, with the existing one-401 fresh-token retry. Confirmed204 returns
+undefined; other successful JSON follows the unchanged low-level HTTP convention.
+Errors retain status/code/message. No automatic network/404/409 retry.
+
+The shared Home info panel and Members screen already provide Leave and its
+confirmation. The SDK binds their existing actions.leave, shows Leaving clan…,
+and prevents duplicate submissions. Only confirmed success clears membership,
+role, members, join/search state and the old clan room/history. It uses configured
+Discover (or Create fallback), without reload. If the player navigated to Friends
+while waiting, that active tab is retained. Errors preserve membership and show
+server text safely; the player can retry via the existing confirmation.
+
+Owners may leave: the server chooses the earliest remaining member as owner
+(ties use player ID), or deletes the clan when empty. No invented leader ban is
+applied. Confirmed failures include404 clan_not_found,409 not_in_clan and403
+origin_not_allowed; ordinary authentication/service failures also remain errors.
+
+Direct-message history and its existing WebSocket remain connected. Pending old
+clan reads/events are ignored, including stale room-list snapshots; dispatched
+HTTP requests are not undone. Backend Realtime membership removal remains the
+permission authority. Account switching still requires resetPlayerSession or
+widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
+the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
+
+Verification and changed files: [TEAM-214 report](TEAM-214.md).
