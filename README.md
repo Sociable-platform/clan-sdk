@@ -115,7 +115,7 @@ The config is retained across internal screen/tab navigation. Navigation never r
 
 Cache entries retain the backend payload and exact ETag in page memory, keyed by canonical Platform URL + game ID. Subsequent explicit loads/refreshes send that ETag unchanged in `If-None-Match`. A 304 reuses cache without reading the body or checking `ok`; a cacheless 304 retries once unconditionally. Concurrent older results cannot overwrite newer cache entries or local updates.
 
-Network failures, a five-second total timeout, 404/other HTTP failures, malformed JSON/envelopes or render failures use a fresh built-in **current-format** appearance. No player/clan/message sample is supplied. Failures do not break the host game. Previous cached config/ETag is not replaced by a loading failure; the displayed fallback still replaces appearance and preserves an active draft. Diagnostics log only safe SDK categories/status, not tokens, URLs, payloads or exception contents. Caller cancellation/destroy rejects with `AbortError` instead of mounting fallback.
+Initial loading failures (network, timeout, HTTP, JSON/envelope or render errors) use the built-in current-format appearance. Once a widget is mounted, failed `refreshConfig()` rejects and preserves its previous configuration and draft. No player/clan/message sample is supplied. Cached config/ETag is not replaced by a loading failure. Diagnostics log safe categories/status, never credentials or payloads. Caller cancellation/destroy rejects with `AbortError`. Standalone `sdk.loadConfig()` retains its existing default fallback behavior.
 
 ## Direct config and lifecycle
 
@@ -325,10 +325,10 @@ automatically. Reconnect reloads membership/history, pages back to the last know
 message, merges incoming frames and deduplicates by message ID. The initial page
 uses `chat.historyLimit` capped at the backend maximum100, default50 if absent.
 
-DM rooms are provisioned by the backend after friendship acceptance. Opening a
-socket never creates a room. **Clan room provisioning is still absent in the
-inspected backend**: SDK supports actual returned clan rooms with matching
-membership/config, but does not invent a conversation ID or promise clan E2E.
+DM rooms are provisioned after friendship acceptance. The latest inspected
+backend also provisions clan rooms from Social membership events. Opening a
+socket never creates either room. SDK uses actual returned conversation IDs;
+see TEAM-226 below for the current implementation and live-verification limits.
 
 `widget.destroy()` closes the socket, detaches listeners and cancels timers;
 pending responses cannot repaint. For logout destroy first, then clear the host
@@ -338,8 +338,9 @@ on that SDK reset their data/drafts and reconnect for the new identity. Token
 rotation alone cannot identify an account switch.
 
 `config.updated` and positive `hello.configVersion` emit
-`clan-sdk:config-updated` (`{version}`). Platform-mounted handles refresh through
-the existing public loader/cache after0–500ms jitter, with teardown/stale guards;
+`clan-sdk:config-updated` (`{version}`). Platform-mounted handles compare against
+the loaded publication version (not schemaVersion), coalesce duplicate notices,
+and refresh through the existing loader/cache after0–500ms jitter with stale guards;
 direct-config hosts may handle this event themselves. No polling is added.
 
 See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
@@ -377,3 +378,31 @@ widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
 the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
 
 Verification and changed files: [TEAM-214 report](TEAM-214.md).
+
+## Realtime clan chat (TEAM-226)
+
+The SDK reuses the same authenticated Realtime connection for DMs and clan chat.
+After hello it reads conversations, matches kind:clan with the current Social
+clanId, and loads history using that room's actual id. The shared Home/Chat UI
+receives final server text; ACK/new/history overlap is deduplicated by room and
+message IDs. Failed or unknown sends keep the draft and are never auto-replayed.
+
+Membership events/known clan notifications refresh Social state or invalidate it,
+remove the old room and pending reads, and clear its draft even when hidden.
+Unrelated DMs and their connection survive. New confirmed membership can reactivate
+an existing room/history. Unknown notification kinds are ignored. Clan online
+values are snapshots; friend-only presence frames do not create live clan presence.
+
+Recoverable closes use exponential backoff starting at1s and capped30s with jitter;
+1008 waits30s;4001 forces shared token refresh;4403 destroys the panel and stops.
+The host may observe clan-sdk:suspended {code:4403}; do not remount in a loop.
+After reconnect, hello/list/history recovery catches missed messages without resend.
+
+Minimal game integration is unchanged: init with gameId, platformUrl, socialUrl,
+realtimeUrl (HTTP/S base, e.g. http://localhost:8083) and getPlayerToken, then
+mountExperience({container}). Published config must enable clan.enabled,
+chat.enabled and chat.clanChat. Backend CORS must allow the exact game origin
+(e.g. http://localhost:5173); host CSP must allow HTTP/S and WS/S connections.
+No game-side chat transport/state or secret API key is needed in the browser.
+
+Current results and live blockers: [TEAM-226 report](TEAM-226.md).

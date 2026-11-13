@@ -6,6 +6,19 @@ export function registerFriendsTests({test,assert,container}) {
  const stranger={id:'22222222-2222-4222-8222-222222222222',displayName:'New Player',relation:'none'};
  const outgoing={...sent,id:'11111111-1111-4111-8111-111111111111',player:{id:stranger.id,displayName:stranger.displayName}};
  const config=()=>{const c=currentConfig();c.clan.enabled=false;return c;};
+ const assertPlayerRow=(row,name,canChat)=>{
+  const select=row.querySelector('.sk-friend-select');
+  assert(select&&!select.hidden&&getComputedStyle(select).display!=='none','Player identity hidden');
+  for(const selector of ['.sk-friend-name','.sk-avatar']){
+   const node=select.querySelector(selector);
+   assert(node&&node.getBoundingClientRect().width>0&&node.getBoundingClientRect().height>0,`${selector} not visible`);
+  }
+  assert(select.querySelector('.sk-friend-name').textContent===name,'Wrong player name');
+  select.click();
+  assert(!row.querySelector('.sk-member-panel')&&select.disabled,'Identity opened preview friend management');
+  const chat=row.querySelector('.sk-friend-row > .sk-btn');
+  assert(chat&&chat.hidden===!canChat,'Wrong Chat visibility');
+ };
  async function fixture(run,override) {
   const store={friends:[friend],incoming:[incoming],outgoing:[outgoing],players:[stranger]};
   return withSocial(container,async(url,opt,calls)=>{
@@ -28,8 +41,47 @@ export function registerFriendsTests({test,assert,container}) {
   assert(calls[0].url.endsWith('/players/me')&&calls.length===3,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('[data-friend-action="remove"]').dataset.friendId===friend.id,'Remove used request/external ID');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
  }));
  test('Friends search sends debounced server q, Add sends Social playerId then refreshes requests/search',()=>fixture(async({mount,calls})=>{
-  const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="remove"]'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));root.querySelector('[data-friend-action="send"]').click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
+  const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="remove"]'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));
+  assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
+  root.querySelector('[data-friend-action="send"]').click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
+  assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
   const post=calls.find(c=>c.method==='POST');assert(post.body===JSON.stringify({playerId:stranger.id}),'Wrong namespace/body');assert(calls.some(c=>c.url.endsWith('?q=New+%26+Player')),'Search query not encoded');assert(calls.filter(c=>c.url.endsWith('/friends/requests')&&c.method==='GET').length===2,'Requests not refreshed');
+ }));
+ test('Outgoing requests only offer Cancel while incoming requests offer Accept and Decline',()=>fixture(async({mount})=>{
+  const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="cancel"]'));
+  const outgoingRow=root.querySelector('[data-friend-action="cancel"]').closest('.sk-row');
+  const incomingRow=root.querySelector('[data-friend-action="accept"]').closest('.sk-row');
+  assert(outgoingRow.querySelectorAll('button').length===1,'Outgoing request has recipient actions');
+  assert(outgoingRow.querySelector('button').dataset.friendAction==='cancel','Missing sender Cancel');
+  assert(incomingRow.querySelectorAll('button').length===2,'Incoming request has duplicate actions');
+  assert(incomingRow.querySelector('[data-friend-action="accept"]')&&incomingRow.querySelector('[data-friend-action="decline"]'),'Missing recipient actions');
+ }));
+ test('Friends search keeps names/avatars visible for every relation and only friends can Chat',()=>fixture(async({mount,store})=>{
+  store.players=[
+   stranger,
+   {id:friend.id,displayName:friend.displayName,relation:'friend'},
+   {...stranger,id:incoming.player.id,displayName:incoming.player.displayName,relation:'request_received',requestId:incoming.id},
+   {...stranger,id:'33333333-3333-4333-8333-333333333333',displayName:'Pending Player',relation:'request_sent',requestId:outgoing.id},
+  ];
+  const cfg=config();cfg.chat.enabled=true;cfg.chat.directMessages=true;
+  const {root,handle}=mount(cfg);await waitFor(()=>root.querySelector('[data-friend-action="remove"]'));
+  assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),friend.displayName,true);
+  type(root,'player-search','server query');
+  await waitFor(()=>root.querySelectorAll('.sk-content > .sk-friend').length===store.players.length);
+  const rows=[...root.querySelectorAll('.sk-content > .sk-friend')];
+  rows.forEach((row,index)=>{
+   const p=store.players[index];assert(!row.hidden,'Server result hidden by local filter');
+   assertPlayerRow(row,p.displayName,p.relation==='friend');
+  });
+  assert(rows[0].querySelector('[data-friend-action="send"]'),'Missing Add friend');
+  assert(rows[1].querySelector('[data-friend-action="remove"]'),'Missing Remove friend');
+  assert(rows[2].querySelector('[data-friend-action="accept"]')&&rows[2].querySelector('[data-friend-action="decline"]'),'Missing incoming request actions');
+  assert(rows[3].querySelector('[data-friend-action="cancel"]'),'Missing outgoing request action');
+  cfg.chat.directMessages=false;handle.updateConfig(cfg);
+  root.querySelectorAll('.sk-content > .sk-friend').forEach(row=>{
+   assert(!row.querySelector('.sk-friend-row > .sk-btn'),'Chat rendered with direct messages disabled');
+   assert(row.querySelector('.sk-friend-name').getBoundingClientRect().width>0,'Disabling Chat hid player identity');
+  });
  }));
  test('Friends Accept prevents duplicate clicks while pending and refetches shared lists',()=>{const pending=deferred();let posts=0;return fixture(async({mount,store,calls})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="accept"]'));const accept=root.querySelector('[data-friend-action="accept"]');accept.click();accept.click();await waitFor(()=>posts===1);assert(root.querySelector('[data-friend-action="accept"]').disabled,'Pending Accept enabled');store.incoming=[];pending.resolve(json(friend));await waitFor(()=>!root.querySelector('[data-friend-action="accept"]'));assert(posts===1&&calls.filter(c=>c.url.endsWith('/friends')&&c.method==='GET').length===2,'Duplicate mutation or missing refetch');

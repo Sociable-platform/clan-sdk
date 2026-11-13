@@ -21,15 +21,30 @@ export function decorateFriends(shadow,data,labels) {
     const description=row.querySelector('.sk-friend-request');
     if(outgoing&&description?.lastChild?.nodeType===3)text(description.lastChild,' · Request sent');
     action(row,outgoing?'cancel':'accept',request.id,outgoing?labels.cancel:labels.accept,row.querySelector('button'));
-    if(!outgoing)action(row,'decline',request.id,'Decline');
+    if(outgoing){
+      // Shared UI renders an incoming-request Decline button by default.
+      row.querySelectorAll('button:not([data-friend-action="cancel"])').forEach(button=>button.remove());
+    }else{
+      action(row,'decline',request.id,'Decline',row.querySelector('button:not([data-friend-action])'));
+    }
   });
   shadow.querySelectorAll('.sk-content > .sk-friend').forEach((row,index)=>{
     const player=data.friends?.[index];if(!player)return;
     // Search results are already server-filtered; the shared local name-only
     // filter must not hide the server's authoritative rows.
     if(searching)row.hidden=false;
-    const chat=row.querySelector('button:not([data-friend-action])');
-    if(chat&&player.relation!=='friend')chat.hidden=true;
+    // The shared preview opens friend management for every identity. Live rows
+    // already have SDK actions based on the server's relationship to the player.
+    const identity=row.querySelector('.sk-friend-select');
+    if(identity){
+      identity.disabled=true;
+      identity.setAttribute('aria-label',player.name);
+      identity.removeAttribute('aria-expanded');
+    }
+    row.querySelector('.sk-member-panel')?.remove();
+    // The name/avatar selector is also a button; only hide the Chat action.
+    const chat=row.querySelector('button.sk-btn:not(.sk-friend-select):not([data-friend-action])');
+    if(chat)chat.hidden=player.relation!=='friend';
     if(player.relation==='request_sent')action(row,'cancel',player.requestId,labels.cancel);
     else if(player.relation==='request_received'){
       action(row,'accept',player.requestId,labels.accept);action(row,'decline',player.requestId,'Decline');

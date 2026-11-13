@@ -1,5 +1,5 @@
-export function selectedChatKey(shadow,data) {
-  if(shadow.querySelector('.sk-panel')?.hidden||!shadow.querySelector('[data-key="message"]'))return null;
+export function selectedChatKey(shadow,data,includeHidden=false) {
+  if(!includeHidden&&shadow.querySelector('.sk-panel')?.hidden||!shadow.querySelector('[data-key="message"]'))return null;
   if(data.tab!=='chat')return data.tab==='clan'&&data.screen==='home'?'clan':null;
   const chips=[...shadow.querySelectorAll('.sk-chip')],index=chips.findIndex(el=>el.getAttribute('aria-pressed')==='true');
   return data.chatKeys?.[index]??null;
