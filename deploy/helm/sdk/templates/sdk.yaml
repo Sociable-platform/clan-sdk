@@ -1,0 +1,73 @@
+# The SDK asset server: one nginx pod, published at https://sdk.<domain> by ingress.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sdk
+  labels:
+    app.kubernetes.io/part-of: clan
+    app.kubernetes.io/name: sdk
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    app.kubernetes.io/name: sdk
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sdk
+  labels:
+    app.kubernetes.io/part-of: clan
+    app.kubernetes.io/name: sdk
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sdk
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: clan
+        app.kubernetes.io/name: sdk
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      # nginx-unprivileged runs as user 101.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      containers:
+        - name: sdk
+          image: {{ printf "%s:%s" .Values.image.repository (required "image.tag is required: --set image.tag=<commit sha>" .Values.image.tag) }}
+          # A commit SHA never changes, so the node can keep its copy.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # This server answers 404 on everything but the bundle paths, so the bundle is the health check.
+          readinessProbe:
+            httpGet:
+              path: /v1/clan-sdk.js
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v1/clan-sdk.js
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

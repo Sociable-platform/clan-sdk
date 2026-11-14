@@ -1,0 +1,32 @@
+# The SDK asset server: nginx serving /v1/clan-sdk.js and /<version>/clan-sdk.js on port 8080
+# (see ../../../Dockerfile and nginx.conf). Installed as its own release, "clan-sdk", in the same
+# namespace as the clan chart of clan-backend, so the SDK deploys without touching that chart.
+#
+# It reuses two things the clan chart created, and nothing else:
+#   - the registry pull secret "gitlab-registry" (a group token, so it can pull this image too)
+#   - the ClusterIssuer "clan-letsencrypt" (Let's Encrypt account)
+
+image:
+  repository: registry.gitlab.com/clan-platform/clan-sdk/sdk
+  # The full commit SHA that the CI job "images" pushed. Required; set by every deploy:
+  #   --set image.tag=<sha>
+  tag: ""
+
+# The pull secret in this namespace. Empty: none (only works if the image is public).
+imagePullSecret: gitlab-registry
+
+# Public URL: https://sdk.<domain>. Empty domain: nothing is published.
+ingress:
+  domain: ""
+  tls:
+    # true: HTTPS with a Let's Encrypt certificate from cert-manager, and http:// redirects to it.
+    enabled: false
+    # clan-letsencrypt (real certificates) or clan-letsencrypt-staging (untrusted test certificates)
+    clusterIssuer: clan-letsencrypt
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    memory: 64Mi
