@@ -8,6 +8,7 @@ import {registerPlatformConfigTests} from './platform-config-tests.js';
 import {registerFriendsTests} from './friends-tests.js';
 import {registerChatTests} from './chat-tests.js';
 import {registerLeaveTests} from './leave-tests.js';
+import {registerClanChatTests} from './clan-chat-tests.js';
 
 const sandbox=document.querySelector('#sandbox'),results=document.querySelector('#results'),cases=[];
 const test=(name,run)=>cases.push({name,run});
@@ -70,9 +71,11 @@ test('shared mobile container keeps panel/composer inside viewport and content s
   const frame=document.createElement('iframe');frame.style.cssText='width:320px;height:480px;border:0';document.body.append(frame);
   try{const target=frame.contentDocument.body.appendChild(frame.contentDocument.createElement('div'));const {root}=mount(currentConfig(),target);await waitFor(()=>root.querySelector('.sk-composer'));const dock=root.querySelector('.sk-dock').getBoundingClientRect(),view=frame.contentWindow;assert(dock.left>=0&&dock.right<=view.innerWidth&&dock.top>=0&&dock.bottom<=view.innerHeight,'Dock overflows');const content=root.querySelector('.sk-content');assert(getComputedStyle(content).overflowY==='auto','Content cannot scroll');const composer=root.querySelector('.sk-composer');content.scrollTop=content.scrollHeight;const box=composer.getBoundingClientRect();assert(box.top>=0&&box.bottom<=view.innerHeight,'Composer inaccessible');}finally{frame.remove();}
 }));
-test('shared font assets are reference-counted and cleaned on update/destroy',()=>{
+test('shared font assets are optional in bundles and reference-counted in source integrations',()=>{
   const before=document.querySelectorAll('link[data-clan-sdk-fonts]').length,cfg=currentConfig();cfg.theme.fonts.body.family='Orbitron';cfg.theme.fonts.heading.family='Orbitron';const a=sdk.mountExperience({container:container(),config:cfg,previewData:{}}),b=sdk.mountExperience({container:container(),config:cfg,previewData:{}});
-  assert(document.querySelectorAll('link[data-clan-sdk-fonts]').length===before+1,'Font link duplicated');a.destroy();assert(document.querySelectorAll('link[data-clan-sdk-fonts]').length===before+1,'Shared font released early');b.destroy();assert(document.querySelectorAll('link[data-clan-sdk-fonts]').length===before,'Font asset leaked');
+  const links=document.querySelectorAll('link[data-clan-sdk-fonts]').length;
+  const bundled=new URLSearchParams(location.search).get('sdk')==='bundle';
+  assert(links===before+(bundled?0:1),bundled?'Bundle fetched external stylesheet':'Font link duplicated');a.destroy();assert(document.querySelectorAll('link[data-clan-sdk-fonts]').length===links,'Shared font released early');b.destroy();assert(document.querySelectorAll('link[data-clan-sdk-fonts]').length===before,'Font asset leaked');
 });
 test('wrapped direct mount/update accepts current JSON and rejects invalid wrappers/versions atomically',()=>withSocial(container,()=>json({clan,role:'member'}),async({mount})=>{
   const cfg=currentConfig(),{root,handle}=mount({config:cfg});
@@ -95,6 +98,7 @@ registerPlatformConfigTests({test,assert,container});
 registerFriendsTests({test,assert,container});
 registerChatTests({test,assert,container});
 registerLeaveTests({test,assert,container});
+registerClanChatTests({test,assert,container});
 let failures=0;
 // Let settled token/HTTP microtasks drain before the next case installs its
 // recording fetch. Abandoned requests must not contaminate another fixture.

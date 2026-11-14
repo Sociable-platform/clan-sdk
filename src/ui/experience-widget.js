@@ -36,8 +36,11 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   const defaultTab=()=>current.clan?.enabled===true?'clan':current.friends?.enabled===true?'friends':'chat';
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
-    renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body)});
-    chat=createChatController({client:chatClient(sdk),onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh(),onConfig:detail=>notify('config-updated',detail)});
+    renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body),onChatRefresh:()=>chat.refresh()});
+    chat=createChatController({client:chatClient(sdk),isVisible:()=>doc.visibilityState!=='hidden',onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh(),onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
+      if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
+      else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
+    }});
     friends=createFriendsController({sdk,onChange:next=>{friendState=next;render();}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{
       state=next;render();if(live){friends.setView(current.friends?.enabled===true,state.tab==='friends');chat.configure(current,state.clan?.id);}
@@ -53,6 +56,9 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   const unsubscribe=live?playerSession(sdk)?.subscribe(()=>{
     controller.destroy();friends.destroy();chat.destroy();renderer.destroy();boot();
   }):undefined;
+  const visible=()=>chat.markRead();
+  if(live)doc.addEventListener('visibilitychange',visible);
+  function destroy(){if(destroyed)return;destroyed=true;unsubscribe?.();doc.removeEventListener('visibilitychange',visible);controller.destroy();friends.destroy();chat.destroy();renderer.destroy();host.remove();releaseContainer(container);}
   return {
     updateConfig(next){
       if(destroyed)throw new Error('Cannot update a destroyed SDK widget.');
@@ -67,6 +73,6 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     refreshFriends(){if(destroyed)throw new Error('Cannot refresh a destroyed SDK widget.');return friends.refresh();},
     reconnectChat(){if(destroyed)throw new Error('Cannot reconnect a destroyed SDK widget.');chat.reconnect();},
     navigate(screen){if(destroyed)throw new Error('Cannot navigate a destroyed SDK widget.');if(!['discover','create','home','members'].includes(screen))throw new TypeError('Unknown clan screen.');controller.navigate(screen);},
-    destroy(){if(destroyed)return;destroyed=true;unsubscribe?.();controller.destroy();friends.destroy();chat.destroy();renderer.destroy();host.remove();releaseContainer(container);},
+    destroy,
   };
 }

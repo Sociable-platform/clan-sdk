@@ -5,15 +5,18 @@ import {decorateChat,selectedChatKey} from './chat-controls.js';
 
 // Same source components/styles as dashboard preview. These small runtime hooks
 // bridge missing shared-package inputs; they never fetch/authenticate or invent data.
-export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),live = true} = {}) {
+export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),onChatRefresh=()=>{},live = true} = {}) {
   let handle, shadow, observer;
   let data = {}, config = {}, destroyed = false;
+  let draftRoom,draftClan,purgeDraft=false;
   const doc = container.ownerDocument;
   const fonts = widgetFonts(doc);
   const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
 
   function decorate() {
     if (destroyed || !live || !shadow) return;
+    const composer=shadow.querySelector('[data-key="message"]');
+    if(purgeDraft&&composer){purgeDraft=false;composer.value='';composer.dispatchEvent(new doc.defaultView.Event('input',{bubbles:true}));}
     const state = data.sdkState ?? {};
     const labels = buildLabels(config);
     const header = shadow.querySelector('.sk-header');
@@ -53,7 +56,8 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       text.textContent = message;
       status.replaceChildren(text);
     }
-    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):Boolean(state.error || state.status === 'error');
+    const chatVisible=data.tab==='chat'||data.tab==='clan'&&data.screen==='home';
+    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error');
     if (canRetry && !status.querySelector('[data-sdk-retry]')) {
       const retry = doc.createElement('button');
       retry.type = 'button';
@@ -142,7 +146,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     const friend=event.target.closest?.('[data-friend-action]');
     if(friend){event.preventDefault();event.stopImmediatePropagation();if(!friend.disabled)onFriendAction(friend.dataset.friendAction,friend.dataset.friendId);return;}
     if(event.target.closest?.('[data-friend-refresh]')){onFriendRefresh();return;}
-    if (event.target.closest?.('[data-sdk-retry]')) {if(data.tab==='friends')onFriendRefresh();else onRetry();}
+    if (event.target.closest?.('[data-sdk-retry]')) {if(data.tab==='friends')onFriendRefresh();else if(data.tab==='chat'||data.screen==='home')onChatRefresh();else onRetry();}
     if (event.target.closest?.('.sk-composer button')) {
       if(live){event.preventDefault(); event.stopImmediatePropagation();send();}
     }
@@ -153,6 +157,11 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     }
   };
   const input = event => {
+    if(event.target.matches?.('[data-key="message"]')){
+      const selected=selectedChatKey(shadow,data,true);
+      draftRoom=event.target.value?data.chatRooms?.[selected]:undefined;
+      draftClan=event.target.value&&selected==='clan'?data.clan?.id:undefined;
+    }
     if (event.target.matches?.('[data-key="search"]')) onSearch(event.target.value);
     else if(event.target.matches?.('[data-key="player-search"]'))onFriendSearch(event.target.value);
     else decorate();
@@ -160,6 +169,9 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
   return {
     update(nextConfig, nextData) {
       if (destroyed) return;
+      // Track the draft's room even when its composer is temporarily absent.
+      // Purge through the shared input hook when the next composer is rendered.
+      if(live&&(draftClan&&(draftClan!==nextData.clan?.id||nextConfig.chat?.enabled!==true||nextConfig.chat?.clanChat!==true)||draftRoom&&nextData.sdkState?.chat?.status==='connected'&&!nextData.sdkState.chat.listLoading&&!Object.values(nextData.chatRooms??{}).includes(draftRoom))){purgeDraft=true;draftRoom=undefined;draftClan=undefined;}
       const active = shadow?.activeElement;
       const scroller=shadow?.querySelector('[data-key="content"]');
       const follow=scroller&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<32;

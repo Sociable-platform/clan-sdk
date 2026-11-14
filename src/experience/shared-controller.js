@@ -22,7 +22,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     onNavigate() {},
     onJoined(detail) { onEvent('joined',detail); void membership('home'); },
   });
-  async function membership(target) {
+  async function membership(target,{preserveView=false}={}) {
     if(state.leavePending)return;
     const generation=membershipGeneration;
     const ticket = ++revision;
@@ -35,7 +35,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       if(typeof result.role!=='string'||!result.role.trim())throw new TypeError('myClan must include the player role.');
       state = {...state, members:state.clan?.id===clan.id?state.members:[],clan, role:result.role, membershipKnown:true,
         profilePending:false, screen:currentVisit === visit ? target ?? 'home' : state.screen==='create'?'home':state.screen,
-        tab:currentVisit === visit ? 'clan' : state.tab, error:''};
+        tab:!preserveView&&currentVisit === visit ? 'clan' : state.tab, error:''};
       state.screen = resolveScreen(state.screen, true);
       list.navigate(state.tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
       list.setEnabled(true); emit();
@@ -67,6 +67,13 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     } catch (error) { if (!dead && ticket === revision && generation===membershipGeneration) fail(error); }
   }
   return {
+    refreshMembership() {if(dead||!enabled||state.profilePending||state.leavePending)return;return membership(state.clan?state.screen:'home',{preserveView:true});},
+    invalidateClan(id) {
+      if(dead||state.clan?.id!==id)return;
+      revision++;membershipGeneration++;visit++;
+      state={...state,clan:null,role:null,members:[],profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',error:'',screen:resolveScreen('discover',false)};
+      emit();list.reset();list.navigate(state.tab==='clan'&&state.screen==='discover'?'discover':'create');list.setEnabled(enabled);
+    },
     async leave() {
       if(dead||!enabled||!state.clan||!state.membershipKnown||state.profilePending||state.leavePending)return;
       const clanId=state.clan.id,generation=++membershipGeneration,currentVisit=visit;

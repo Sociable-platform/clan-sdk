@@ -1,6 +1,8 @@
 node_modules/
 .env
 coverage/
+dist/
+test/browser/artifacts/
 docs/
 *.tgz
 env

@@ -1,0 +1,83 @@
+# Same test/build stages, branch rules and Docker-in-Docker setup as clan-backend.
+# On main the image is then deployed to the k3s server, as its own Helm release (deploy/helm/sdk).
+stages:
+  - test
+  - build
+  - deploy
+
+test:
+  stage: test
+  image: node:22-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+  script:
+    # GITLAB_NPM_TOKEN is the existing masked read-only group deploy token.
+    - npm ci --no-audit --no-fund
+    - npm test
+
+images:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    PLATFORMS: linux/amd64,linux/arm64
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker context create tls-environment
+    - docker buildx create --use --driver docker-container tls-environment
+  script:
+    - |
+      set -eu
+      : "${GITLAB_NPM_TOKEN:?Set the masked read-only package registry token}"
+      docker buildx build \
+        --platform "$PLATFORMS" \
+        --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN \
+        --tag "$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA" \
+        --push .
+      # Inspect the pushed index; both target platforms must be present.
+      docker buildx imagetools inspect "$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA"
+
+# Deploys this commit's image to the k3s server with deploy/deploy.sh (helm upgrade of the release
+# "clan-sdk" on the server, image tag = $CI_COMMIT_SHA, the tag the "images" job just pushed).
+# Only main deploys, by itself after every merge. Nothing in clan-backend has to change.
+# GitLab lists every deploy under Operate -> Environments -> sdk-production, where an older one
+# can be deployed again (a rollback).
+#
+# Needs these CI/CD variables (project or group, Settings -> CI/CD -> Variables), both "Protected",
+# so only pipelines of protected branches (main) can read them. They are the same two that
+# clan-backend's deploy job uses:
+#   DEPLOY_SSH_KEY_B64       the CI's SSH private key, base64 in one line ("Masked")
+#   DEPLOY_SSH_KNOWN_HOSTS   the server's host key (from ssh-keyscan), so CI cannot be fooled
+deploy:
+  stage: deploy
+  image: alpine:3.20
+  # Runs only after this commit's image was pushed.
+  needs: [images]
+  # One SDK deploy at a time; a second one waits for the first.
+  resource_group: sdk-production
+  environment:
+    name: sdk-production
+    url: https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.js
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - apk add --no-cache bash openssh-client
+    # Files readable only by this job's user. The values never appear in the log.
+    - umask 077
+    - mkdir -p ~/.ssh
+    - echo "$DEPLOY_SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+    - echo "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+  script:
+    - bash deploy/deploy.sh "$CI_COMMIT_SHA"
+  after_script:
+    - rm -f ~/.ssh/id_ed25519

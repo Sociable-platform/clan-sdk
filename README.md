@@ -34,8 +34,9 @@ Other shells can export an existing secret environment variable before running:
 
 ```sh
 npm ci
+npm run build
 npm test
-npm run test:browser
+npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
@@ -48,40 +49,181 @@ npm run test:browser
 ```
 
 Include the resulting changed `package-lock.json` with every dependency update.
-Do not substitute `file:` links or copied repositories. No SDK bundle/CDN build
-is introduced here. The lockfile currently resolves registry release **0.1.1**.
+Do not substitute `file:` links or copied repositories. The lockfile currently
+resolves registry release **0.1.1**, which is bundled into both browser formats.
 See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
-Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. The server resolves the installed package's public export and serves its relative modules/styles/assets, without assuming a source directory layout. It prints the installed version at startup. There is no build script; `src/index.js` is the ESM entrypoint.
+`npm run build` is the canonical build command. It uses esbuild and produces
+`dist/clan-sdk.js` (classic script/IIFE) and `dist/clan-sdk.esm.js` (ES module).
+Each contains the published UI renderer and its Shadow DOM CSS. Both have a
+version banner read from `package.json`; the same version is exposed as
+`ClanSDK.version` or the ESM `version` export. All existing public exports remain
+available. Each output must be **under 60,000 bytes gzip**; the build prints both
+sizes and fails if either reaches that limit. No bundler, import map, React,
+separate UI stylesheet, or source checkout is needed by the consuming game.
+Standalone builds use the renderer's system font fallbacks and never fetch
+Google Fonts CSS. A game can supply fonts itself if it wants the curated faces.
 
-CI: no installation pipeline file was found in this SDK checkout. Configure
-`GITLAB_NPM_TOKEN` as a **masked secret CI/CD variable** in GitLab (protected where
-appropriate for your branch policy), using the read-only deploy token above.
-An install job should run `npm ci` followed by `npm test`, after the generated
-lockfile is committed. Do not echo the variable or enable shell tracing around
-credentials. No CI pipeline was run or claimed passing for this migration.
+`npm run test:bundle` requires a completed build. It launches headless Chromium
+(or installed Chrome/Edge), starts the plain Node HTTP server on a temporary
+port, and checks both built files on isolated HTML pages without import maps.
+It checks API/version parity, a visible styled panel, token/service URL handling,
+and rejects any extra SDK code or stylesheet requests. It then runs the existing
+browser regression suite against the built ESM output. These are **bundle-loading
+and regression tests with mocked Platform/Social/Realtime services**, not live
+backend verification. Screenshots are written to `test/browser/artifacts/`.
+If no browser is installed, run `npx playwright install chromium`; optionally set
+`BROWSER_CHANNEL=chrome` or `msedge` to select an installed browser.
+
+`npm run test:browser` still serves the original source-mode tests at
+http://127.0.0.1:5174/. It starts a server without launching a browser; open the
+page to execute the assertions. Set `BROWSER_TEST_PORT` if necessary. Its import
+map serves the installed UI package for development/comparison only. After a
+build, the standalone pages are available at `/test/browser/bundle-iife.html`
+and `/test/browser/bundle-esm.html` on the same plain HTTP server. No Vite server
+is used. `src/index.js` remains the source/package entry point.
+
+CI uses the committed `.gitlab-ci.yml` to run `npm ci`/`npm test`, then build and
+publish the asset-server image. Configure `GITLAB_NPM_TOKEN` as a **masked secret
+CI/CD variable**, using the read-only group deploy token above; protect it where
+appropriate for branch policy. It must be available to any publishing job you
+start. The Docker build receives it only through a BuildKit secret. Do not echo
+it or enable shell tracing around credentials.
 
 `npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock. Actual current results are in [shared renderer notes](docs/shared-renderer.md).
 
+## Docker asset server
+
+The multi-stage Dockerfile builds from source with Node 22 (`npm ci` followed by
+the canonical `npm run build`), then copies only the two generated bundles and
+nginx configuration into `nginxinc/nginx-unprivileged:1.28-alpine`. The server runs
+as the image's unprivileged user on port **8080**, matching Studio's service port.
+The Node build runs on the builder's native CPU; the same JavaScript can be
+packaged in either runtime architecture without QEMU. `.dockerignore` allows only
+build inputs, excluding local `node_modules`, `dist`, `.git` and private env files.
+No local bundle directory is required.
+
+With `GITLAB_NPM_TOKEN` already set in your shell as described above:
+
+```sh
+docker build --progress=plain --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN -t clan-sdk:ticket2 .
+docker run --rm -d --name clan-sdk-ticket2-check -p 127.0.0.1:18080:8080 clan-sdk:ticket2
+```
+
+The credential is a [BuildKit secret](https://docs.docker.com/build/building/secrets/),
+never a build argument or Dockerfile `ENV`. It is available only during `npm ci`.
+The committed `.npmrc` keeps its literal `${GITLAB_NPM_TOKEN}` placeholder. The
+runtime has no Node/npm, credentials or SDK source checkout.
+
+Repeat the actual HTTP header checks (use `curl.exe` in Windows PowerShell):
+
+```sh
+VERSION=$(node -p "require('./package.json').version")
+curl -I http://127.0.0.1:18080/v1/clan-sdk.js
+curl -I "http://127.0.0.1:18080/$VERSION/clan-sdk.js"
+curl -I http://127.0.0.1:18080/v1/clan-sdk.esm.js
+curl -I "http://127.0.0.1:18080/$VERSION/clan-sdk.esm.js"
+node scripts/check-image.mjs http://127.0.0.1:18080
+docker stop clan-sdk-ticket2-check
+```
+
+In PowerShell, set the version with `$sdkVersion = node -p "require('./package.json').version"`
+and use `$sdkVersion` in the exact-version URLs. `check-image.mjs` checks both HEAD
+and GET headers, compares downloaded alias/version bytes for both files, checks
+the package-version banners, and verifies missing/private paths return 404.
+These checks use the actual nginx image; they do not contact Clan backends.
+
+| Paths (current release) | Successful response headers |
+| --- | --- |
+| `/0.1.0/clan-sdk.js`, `/0.1.0/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
+
+The exact version is read from `package.json` at build time. `/v1/` is the agreed
+moving alias even for version `0.1.0`; each alias/version pair has identical bytes
+inside one image. **Changed bundle bytes require a new exact release version.**
+Do not rebuild different bytes under a previously released immutable path.
+
+The `images` CI job follows the team's Docker 27/DinD + buildx TLS-context setup:
+automatic on `develop`/`main`, manual on merge request pipelines. It publishes one
+multi-platform image for `linux/amd64,linux/arm64` with the full commit SHA tag:
+`$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA`, resolving in this project to
+`<registry>/clan-platform/clan-sdk/sdk:<sha>`. Login uses `CI_REGISTRY_USER`,
+`CI_REGISTRY_PASSWORD` and `CI_REGISTRY`. It requires a Docker runner configured
+for privileged DinD with the team's shared `/certs/client` TLS setup. The job
+prints `docker buildx imagetools inspect` after pushing; publication and the
+registry's two platform manifests must be checked in GitLab CI. No pipeline was
+run or image published as part of local verification.
+
 ## Minimal game integration
 
-Use a bundler that resolves the SDK's ESM dependencies; the local test server provides an import map for native-browser development.
+Copy either built file into your game's `dist/` directory and serve the page over
+HTTP(S). The examples below use local service URLs; replace the game ID with one
+that has a published widget configuration. The example `/api/player-token`
+endpoint belongs to **your game server**: it must return `{ "token": "..." }`
+for the signed-in player and honor `forceRefresh=true`. It is not a Clan route.
+
+### Classic script
+
+```html
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<div id="social-widget"></div>
+<script src="./dist/clan-sdk.js"></script>
+<script>
+  const sdk = ClanSDK.init({
+    gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
+    platformUrl: 'http://localhost:8081',
+    socialUrl: 'http://localhost:8082',
+    realtimeUrl: 'http://localhost:8083',
+    getPlayerToken: async ({forceRefresh}) => {
+      const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Player authentication failed');
+      return (await response.json()).token;
+    },
+  });
+  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  widget.ready.catch(console.error);
+  console.log(ClanSDK.version);
+</script>
+</html>
+```
+
+### Direct browser ES module
+
+```html
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<div id="social-widget"></div>
+<script type="module">
+  import {init, version} from './dist/clan-sdk.esm.js';
+  const sdk = init({
+    gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
+    platformUrl: 'http://localhost:8081',
+    socialUrl: 'http://localhost:8082',
+    realtimeUrl: 'http://localhost:8083',
+    getPlayerToken: async ({forceRefresh}) => {
+      const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Player authentication failed');
+      return (await response.json()).token;
+    },
+  });
+  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  await widget.ready;
+  console.log(version);
+</script>
+</html>
+```
+
+The service origins must allow your game's origin through CORS. `realtimeUrl`
+is an HTTP(S) base; the SDK derives WS/WSS URLs. The container needs no stylesheet.
+Both formats support the same lifecycle:
 
 ```js
-import {init} from './src/index.js'; // or your installed SDK package
-
-const sdk = init({
-  gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
-  platformUrl: 'http://localhost:8081',
-  socialUrl: 'http://localhost:8082',
-  realtimeUrl: 'http://localhost:8083', // HTTP(S) base; SDK derives ws/wss
-  getPlayerToken: async ({forceRefresh}) => obtainPlayerTokenFromGameServer({forceRefresh}),
-});
-
 const container = document.querySelector('#social-widget');
-const widget = sdk.mountExperience({container});
-await widget.ready;
-
 // Optional host notification. The SDK owns Join/Create/search/navigation.
 container.addEventListener('clan-sdk:joined', event => {
   console.log('Joined clan', event.detail.clanId);
@@ -93,7 +235,7 @@ await widget.refreshConfig();
 widget.destroy();
 ```
 
-`obtainPlayerTokenFromGameServer` is a host-supplied function, not an SDK method or a suggested backend URL. Keep the secret API key and player-token exchange on the game server. Return only the token string, without the `Bearer` prefix. No developer token is needed by W6. The SDK never decodes JWTs or implements registration. Opening the live Friends tab uses the confirmed `GET /players/me` bootstrap for Social identity; init and clan-only flows do not add that request.
+Keep the secret API key and player-token exchange on the game server. The callback must return only the token string, without the `Bearer` prefix. No developer token is needed by W6. The SDK never decodes JWTs or implements registration. Opening the live Friends tab uses the confirmed `GET /players/me` bootstrap for Social identity; init and clan-only flows do not add that request.
 
 `init()` is synchronous and requests neither config nor tokens. Both `gameId` and `platformUrl` are required together to enable Platform loading. `socialUrl` and `getPlayerToken` retain their existing validation. Service URLs are absolute HTTP(S), optionally with a proxy prefix; omit `/api/v1`. Trailing slashes are supported; URL credentials, queries and fragments are rejected.
 
@@ -115,14 +257,14 @@ The config is retained across internal screen/tab navigation. Navigation never r
 
 Cache entries retain the backend payload and exact ETag in page memory, keyed by canonical Platform URL + game ID. Subsequent explicit loads/refreshes send that ETag unchanged in `If-None-Match`. A 304 reuses cache without reading the body or checking `ok`; a cacheless 304 retries once unconditionally. Concurrent older results cannot overwrite newer cache entries or local updates.
 
-Network failures, a five-second total timeout, 404/other HTTP failures, malformed JSON/envelopes or render failures use a fresh built-in **current-format** appearance. No player/clan/message sample is supplied. Failures do not break the host game. Previous cached config/ETag is not replaced by a loading failure; the displayed fallback still replaces appearance and preserves an active draft. Diagnostics log only safe SDK categories/status, not tokens, URLs, payloads or exception contents. Caller cancellation/destroy rejects with `AbortError` instead of mounting fallback.
+Initial loading failures (network, timeout, HTTP, JSON/envelope or render errors) use the built-in current-format appearance. Once a widget is mounted, failed `refreshConfig()` rejects and preserves its previous configuration and draft. No player/clan/message sample is supplied. Cached config/ETag is not replaced by a loading failure. Diagnostics log safe categories/status, never credentials or payloads. Caller cancellation/destroy rejects with `AbortError`. Standalone `sdk.loadConfig()` retains its existing default fallback behavior.
 
 ## Direct config and lifecycle
 
 Current widget JSON may be unwrapped or wrapped in one top-level `config` object:
 
 ```js
-import {normalizeWidgetConfig} from './src/index.js';
+import {normalizeWidgetConfig} from './dist/clan-sdk.esm.js';
 const normalized = normalizeWidgetConfig(JSON.parse(editorText));
 // Both mount and updateConfig also normalize automatically:
 const widget = sdk.mountExperience({container, config: {config: currentConfig}});
@@ -151,14 +293,14 @@ Direct mount is synchronous and has no `ready` or `refreshConfig`; Platform moun
 
 Destroy is idempotent, removes only SDK-owned DOM/listeners/font references, cancels config work, invalidates pending Social completions/timers, and allows remount. The Social methods do not expose AbortSignal, so pending Social HTTP may finish, but its late result cannot update destroyed UI. Container reservation is shared across legacy/current mounts. The shared widget owns its Shadow DOM and constant stylesheet. A thin SDK stage preserves host-page content and protects the mount from ordinary host CSS; transformed ancestors still obey normal fixed-position rules.
 
-Curated Google font families use the same `googleFontsHref` as dashboard preview. The SDK adds reference-counted stylesheet links to the owning document and removes its own links on update/destroy. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
+Source/package integrations load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Standalone bundles omit those external links and use the renderer's system font fallbacks. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
 
 ## Supported shared UI and runtime data
 
 | Config | Shared presentation behavior |
 | --- | --- |
 | `theme.colors` | Brand, panel background, surface, text and muted colors |
-| `theme.fonts` | Curated heading/body families and corresponding font stylesheet |
+| `theme.fonts` | Curated heading/body families with system fallbacks; source integrations also load Google Fonts |
 | `theme.frame/buttons/panel` | Frame, corners, button styles/case, opacity and blur |
 | `theme.textures/components` | Shared built-in textures, safe mapped custom assets and per-part overrides |
 | `layout.position`, `startCollapsed` | **bottom-left/bottom-right** dock and launcher state. Current schema has no numeric width/height or top corners; the shared component owns responsive sizing |
@@ -325,10 +467,10 @@ automatically. Reconnect reloads membership/history, pages back to the last know
 message, merges incoming frames and deduplicates by message ID. The initial page
 uses `chat.historyLimit` capped at the backend maximum100, default50 if absent.
 
-DM rooms are provisioned by the backend after friendship acceptance. Opening a
-socket never creates a room. **Clan room provisioning is still absent in the
-inspected backend**: SDK supports actual returned clan rooms with matching
-membership/config, but does not invent a conversation ID or promise clan E2E.
+DM rooms are provisioned after friendship acceptance. The latest inspected
+backend also provisions clan rooms from Social membership events. Opening a
+socket never creates either room. SDK uses actual returned conversation IDs;
+see TEAM-226 below for the current implementation and live-verification limits.
 
 `widget.destroy()` closes the socket, detaches listeners and cancels timers;
 pending responses cannot repaint. For logout destroy first, then clear the host
@@ -338,8 +480,9 @@ on that SDK reset their data/drafts and reconnect for the new identity. Token
 rotation alone cannot identify an account switch.
 
 `config.updated` and positive `hello.configVersion` emit
-`clan-sdk:config-updated` (`{version}`). Platform-mounted handles refresh through
-the existing public loader/cache after0–500ms jitter, with teardown/stale guards;
+`clan-sdk:config-updated` (`{version}`). Platform-mounted handles compare against
+the loaded publication version (not schemaVersion), coalesce duplicate notices,
+and refresh through the existing loader/cache after0–500ms jitter with stale guards;
 direct-config hosts may handle this event themselves. No polling is added.
 
 See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
@@ -377,3 +520,31 @@ widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
 the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
 
 Verification and changed files: [TEAM-214 report](TEAM-214.md).
+
+## Realtime clan chat (TEAM-226)
+
+The SDK reuses the same authenticated Realtime connection for DMs and clan chat.
+After hello it reads conversations, matches kind:clan with the current Social
+clanId, and loads history using that room's actual id. The shared Home/Chat UI
+receives final server text; ACK/new/history overlap is deduplicated by room and
+message IDs. Failed or unknown sends keep the draft and are never auto-replayed.
+
+Membership events/known clan notifications refresh Social state or invalidate it,
+remove the old room and pending reads, and clear its draft even when hidden.
+Unrelated DMs and their connection survive. New confirmed membership can reactivate
+an existing room/history. Unknown notification kinds are ignored. Clan online
+values are snapshots; friend-only presence frames do not create live clan presence.
+
+Recoverable closes use exponential backoff starting at1s and capped30s with jitter;
+1008 waits30s;4001 forces shared token refresh;4403 destroys the panel and stops.
+The host may observe clan-sdk:suspended {code:4403}; do not remount in a loop.
+After reconnect, hello/list/history recovery catches missed messages without resend.
+
+Minimal game integration is unchanged: init with gameId, platformUrl, socialUrl,
+realtimeUrl (HTTP/S base, e.g. http://localhost:8083) and getPlayerToken, then
+mountExperience({container}). Published config must enable clan.enabled,
+chat.enabled and chat.clanChat. Backend CORS must allow the exact game origin
+(e.g. http://localhost:5173); host CSP must allow HTTP/S and WS/S connections.
+No game-side chat transport/state or secret API key is needed in the browser.
+
+Current results and live blockers: [TEAM-226 report](TEAM-226.md).

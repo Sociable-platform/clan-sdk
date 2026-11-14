@@ -1,0 +1,16 @@
+# Only the files used by the build enter the context. In particular, local
+# node_modules/, dist/, .git/, test artifacts and private env files are excluded.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!.npmrc
+!nginx.conf
+!src/
+!src/**
+!scripts/
+!scripts/build.mjs
+!scripts/prepare-image.mjs
+**/.env
+**/.env.*
+**/*.env

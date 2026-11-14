@@ -7,14 +7,17 @@ import { ConfigLoadError, abortable, abortError, checkAbort, assertAbortSignal }
 // and game ID. Entries preserve backend JSON config and its opaque ETag.
 const cache = new Map();
 const requests = new Map();
+const metadata = new WeakMap();
+export const publishedConfigInfo=config=>config&&typeof config==='object'?metadata.get(config):undefined;
+function published(config,version){const copy=structuredClone(config);if(copy&&typeof copy==='object')metadata.set(copy,{version});return copy;}
 
-export function configDiagnostic(code, {status, path} = {}) {
+export function configDiagnostic(code, {status, path,retain=false} = {}) {
   // Never log URLs, exception messages/causes, headers, ETags or config values.
   const field = typeof path === 'string' ? path.split(/[.[]/, 1)[0] : undefined;
   const details = {code};
   if (Number.isInteger(status)) details.status = status;
   if (['config','kind','schemaVersion','theme','screens'].includes(field)) details.field = field;
-  try { console.warn('[clan-sdk] Published configuration unavailable or unsupported; using SDK defaults.', details); } catch { /* Host loggers must not break loading. */ }
+  try { console.warn(retain?'[clan-sdk] Published configuration refresh failed; previous configuration retained.':'[clan-sdk] Published configuration unavailable or unsupported; using SDK defaults.', details); } catch { /* Host loggers must not break loading. */ }
 }
 
 export function platformSettings(options) {
@@ -36,7 +39,7 @@ export function platformSettings(options) {
 export function createPlatformConfigLoader({gameId,platformUrl,timeoutMs = 5000}) {
   const url = `${platformUrl}/api/v1/public/games/${encodeURIComponent(gameId)}/widget-config`;
   const key = JSON.stringify([platformUrl,gameId]);
-  return async function load({signal} = {}) {
+  return async function load({signal,fallbackOnError=true} = {}) {
     assertAbortSignal(signal);
     checkAbort(signal);
     const ticket = (requests.get(key) ?? 0) + 1;
@@ -57,7 +60,7 @@ export function createPlatformConfigLoader({gameId,platformUrl,timeoutMs = 5000}
         // 304 is not response.ok and has no JSON body. Never try to parse it.
         if (response.status === 304) {
           const available = cache.get(key);
-          if (available) return structuredClone(available.config);
+          if (available) return published(available.config,available.version);
           if (attempt === 0) continue; // Exactly one unconditional recovery attempt.
           throw new ConfigLoadError({code:'config_304_without_cache',status:304,message:'No cached configuration.'});
         }
@@ -78,8 +81,8 @@ export function createPlatformConfigLoader({gameId,platformUrl,timeoutMs = 5000}
         // Platform owns the widget payload. Do not apply an SDK config schema.
         const config = structuredClone(unwrapConfig(envelope));
         checkAbort(controller.signal);
-        if (requests.get(key) === ticket) cache.set(key,{config,etag:response.headers.get('ETag')});
-        return structuredClone(config);
+        if (requests.get(key) === ticket) cache.set(key,{config,version:envelope.version,etag:response.headers.get('ETag')});
+        return published(config,envelope.version);
       }
     } catch (error) {
       // Caller cancellation/destroy must not be converted into a fallback mount.
@@ -87,7 +90,8 @@ export function createPlatformConfigLoader({gameId,platformUrl,timeoutMs = 5000}
       const code = controller.signal.reason?.name === 'TimeoutError' ? 'config_timeout'
         : error instanceof ConfigLoadError ? error.code
         : error instanceof ConfigError ? 'config_invalid_wrapper' : 'config_network_error';
-      configDiagnostic(code,error ?? {});
+      configDiagnostic(code,{status:error?.status,path:error?.path,retain:!fallbackOnError});
+      if(!fallbackOnError)throw error;
       return defaultExperienceConfig();
     } finally {
       clearTimeout(timer);
