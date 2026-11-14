@@ -150,13 +150,16 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
           }else if(frame.type==='error'){
             if(d.code==='bad_frame')try{console.warn('[clan-sdk] Realtime rejected a client frame: bad_frame.');}catch{}
             const item=pending.get(d.replyTo);if(!item)return;
-            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:typeof d.message==='string'?d.message:'Message rejected.'};
-            if(d.code==='slow_mode'||d.code==='rate_limited'){
+            // A cooldown (slow mode, rate limit) is the rules working, not an error: Send stays disabled until it
+            // ends and nothing else is shown, so no error text and no Retry button. The draft stays in the box.
+            const rejected=typeof d.message==='string'?d.message:'Message rejected.',cooldown=d.code==='slow_mode'||d.code==='rate_limited';
+            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:cooldown?'':rejected};
+            if(cooldown){
               const ms=d.code==='rate_limited'?5000:Number.isFinite(d.retryAfterMs)?Math.max(0,d.retryAfterMs):1000;
               state={...state,cooldownUntil:now()+ms};clearTimeout(cooldownTimer);cooldownTimer=setTimeout(()=>{state={...state,cooldownUntil:0};emit();},ms);
             }
             if(['not_member','feature_disabled','blocked'].includes(d.code)){state={...state,blocked:{...state.blocked,[item.conversationId]:d.code}};if(d.code==='not_member'){remove(item.conversationId);void refresh();}}
-            emit();item.reject(fault(state.error,d.code));
+            emit();item.reject(fault(rejected,d.code));
           }else if(frame.type==='conversation.added'||frame.type==='conversation.removed'){
             if(frame.type==='conversation.added'&&state.conversations.some(c=>c.id===d.conversation?.id))return;
             listRevision++;if(frame.type==='conversation.removed'){

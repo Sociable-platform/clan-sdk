@@ -87,7 +87,9 @@ test('ACK timeout reports unknown delivery, retains server history and never rep
 
 test('slow-mode retry delay expires and configured history page size is respected',async t=>{
  const f=setup(t);f.controller.configure({...cfg,chat:{...cfg.chat,historyLimit:20}},null);await tick();f.hello();await tick();f.controller.select(peer);await tick();assert.equal(f.reads[0].args.limit,20);
- const send=f.controller.send(peer,'slow');f.sockets[0].frame('error',{replyTo:f.state().pending.id,code:'slow_mode',message:'Wait',retryAfterMs:10});await assert.rejects(send,e=>e.code==='slow_mode');await assert.rejects(f.controller.send(peer,'too soon'));await new Promise(done=>setTimeout(done,15));assert.equal(f.state().cooldownUntil,0);
+ const send=f.controller.send(peer,'slow');f.sockets[0].frame('error',{replyTo:f.state().pending.id,code:'slow_mode',message:'Wait',retryAfterMs:10});await assert.rejects(send,e=>e.code==='slow_mode'&&e.message==='Wait');
+ // A cooldown is not an error state: nothing for the UI to show, so no warning text and no Retry button.
+ assert.equal(f.state().error,'');assert.ok(f.state().cooldownUntil>0);await assert.rejects(f.controller.send(peer,'too soon'));await new Promise(done=>setTimeout(done,15));assert.equal(f.state().cooldownUntil,0);
 });
 
 test('Social and Realtime share acquisition and a completed 401 refresh wave',async t=>{
