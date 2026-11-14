@@ -143,6 +143,11 @@ moving alias even for version `0.1.0`; each alias/version pair has identical byt
 inside one image. **Changed bundle bytes require a new exact release version.**
 Do not rebuild different bytes under a previously released immutable path.
 
+**Known gap:** the version in `package.json` is not raised on each release yet, so the
+`/0.1.0/` path currently changes with every deploy while browsers may keep it for a
+year. Until releases are versioned, games use `/v1/` only and the pinned path is not
+documented to developers.
+
 The `images` CI job follows the team's Docker 27/DinD + buildx TLS-context setup:
 automatic on `develop`/`main`, manual on merge request pipelines. It publishes one
 multi-platform image for `linux/amd64,linux/arm64` with the full commit SHA tag:
@@ -151,16 +156,62 @@ multi-platform image for `linux/amd64,linux/arm64` with the full commit SHA tag:
 `CI_REGISTRY_PASSWORD` and `CI_REGISTRY`. It requires a Docker runner configured
 for privileged DinD with the team's shared `/certs/client` TLS setup. The job
 prints `docker buildx imagetools inspect` after pushing; publication and the
-registry's two platform manifests must be checked in GitLab CI. No pipeline was
-run or image published as part of local verification.
+registry's two platform manifests must be checked in GitLab CI.
+
+The `test` job runs `npm test` and then `npm run build`, which prints the gzip size of
+each bundle (`dist/clan-sdk.js: ... bytes gzip (... KB; target <60 KB)`) and fails the
+job when a bundle reaches 60 KB.
+
+### Deploy
+
+The bundle is served at `https://sdk.130-61-158-79.sslip.io` from the k3s server, as
+its own Helm release (`clan-sdk`, chart in `deploy/helm/sdk`) in the `clan` namespace.
+It is separate from the `clan` release of clan-backend: deploying the SDK needs no
+change there. It reuses that release's registry pull secret (`gitlab-registry`) and
+certificate issuer (`clan-letsencrypt`), so clan-backend must be installed first.
+
+- **Every merge to `main` is deployed.** The pipeline on `main` runs `test`, `images`,
+  then `deploy`, which runs `deploy/deploy.sh "$CI_COMMIT_SHA"`. `develop` only tests
+  and builds the image. A release is an MR `develop` -> `main`.
+- `deploy/deploy.sh <tag>` copies the chart to the server over SSH and runs
+  `helm upgrade --install clan-sdk ... --set image.tag=<tag> --wait`. If the new pod is
+  not ready within 5 minutes the deploy fails and the old pod keeps serving.
+- The job needs the CI/CD variables `DEPLOY_SSH_KEY_B64` and `DEPLOY_SSH_KNOWN_HOSTS`
+  (protected, the same two clan-backend uses), and `main` must be a protected branch.
+- Check a deploy: `curl -I https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.js` returns
+  200 with `Access-Control-Allow-Origin: *` and `Cache-Control: no-cache`.
+- Which build runs, and rolling back: GitLab -> Operate -> Environments ->
+  `sdk-production`, where an older deploy can be run again.
+- A new `@clan/ui` reaches games only after `npm update @clan/ui` here (it moves
+  `package-lock.json`; the image installs exactly what the lock file says), a merge to
+  `main`, and the deploy.
 
 ## Minimal game integration
 
-Copy either built file into your game's `dist/` directory and serve the page over
-HTTP(S). The examples below use local service URLs; replace the game ID with one
-that has a published widget configuration. The example `/api/player-token`
-endpoint belongs to **your game server**: it must return `{ "token": "..." }`
-for the signed-in player and honor `forceRefresh=true`. It is not a Clan route.
+The SDK is hosted: add one script tag and call `init`. There is nothing to install,
+build or copy into your game.
+
+| What | URL |
+| --- | --- |
+| SDK, script tag (defines `window.ClanSDK`) | `https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.js` |
+| SDK, ES module | `https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.esm.js` |
+| `platformUrl` | `https://platform.130-61-158-79.sslip.io` |
+| `socialUrl` | `https://social.130-61-158-79.sslip.io` |
+| `realtimeUrl` | `https://realtime.130-61-158-79.sslip.io` |
+
+`/v1/` always serves the newest release and is never cached, so a fix reaches every
+game on its next page load. Use this address; the pinned `/<version>/` path described
+under "Docker asset server" is not offered to games yet.
+
+**The game owns the button.** The widget has no launcher of its own: it draws the
+panel, always open, inside the container you give it. Show and hide that container
+with your own button, as the examples do, or mount the widget when the player opens
+it and call `widget.destroy()` when they close it.
+
+Replace the game ID with one that has a published widget configuration. The example
+`/api/player-token` endpoint belongs to **your game server**: it must return
+`{ "token": "..." }` for the signed-in player and honor `forceRefresh=true`. It is
+not a Clan route.
 
 ### Classic script
 
@@ -169,21 +220,26 @@ for the signed-in player and honor `forceRefresh=true`. It is not a Clan route.
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<div id="social-widget"></div>
-<script src="./dist/clan-sdk.js"></script>
+<button id="social-toggle" type="button">Social</button>
+<div id="social-widget" hidden></div>
+<script src="https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.js"></script>
 <script>
+  const container = document.querySelector('#social-widget');
+  // Your own button opens and closes the widget.
+  document.querySelector('#social-toggle').addEventListener('click', () => { container.hidden = !container.hidden; });
+
   const sdk = ClanSDK.init({
     gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
-    platformUrl: 'http://localhost:8081',
-    socialUrl: 'http://localhost:8082',
-    realtimeUrl: 'http://localhost:8083',
+    platformUrl: 'https://platform.130-61-158-79.sslip.io',
+    socialUrl: 'https://social.130-61-158-79.sslip.io',
+    realtimeUrl: 'https://realtime.130-61-158-79.sslip.io',
     getPlayerToken: async ({forceRefresh}) => {
       const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
       if (!response.ok) throw new Error('Player authentication failed');
       return (await response.json()).token;
     },
   });
-  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  const widget = sdk.mountExperience({container});
   widget.ready.catch(console.error);
   console.log(ClanSDK.version);
 </script>
@@ -197,29 +253,40 @@ for the signed-in player and honor `forceRefresh=true`. It is not a Clan route.
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<div id="social-widget"></div>
+<button id="social-toggle" type="button">Social</button>
+<div id="social-widget" hidden></div>
 <script type="module">
-  import {init, version} from './dist/clan-sdk.esm.js';
+  import {init, version} from 'https://sdk.130-61-158-79.sslip.io/v1/clan-sdk.esm.js';
+  const container = document.querySelector('#social-widget');
+  document.querySelector('#social-toggle').addEventListener('click', () => { container.hidden = !container.hidden; });
+
   const sdk = init({
     gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
-    platformUrl: 'http://localhost:8081',
-    socialUrl: 'http://localhost:8082',
-    realtimeUrl: 'http://localhost:8083',
+    platformUrl: 'https://platform.130-61-158-79.sslip.io',
+    socialUrl: 'https://social.130-61-158-79.sslip.io',
+    realtimeUrl: 'https://realtime.130-61-158-79.sslip.io',
     getPlayerToken: async ({forceRefresh}) => {
       const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
       if (!response.ok) throw new Error('Player authentication failed');
       return (await response.json()).token;
     },
   });
-  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  const widget = sdk.mountExperience({container});
   await widget.ready;
   console.log(version);
 </script>
 </html>
 ```
 
-The service origins must allow your game's origin through CORS. `realtimeUrl`
-is an HTTP(S) base; the SDK derives WS/WSS URLs. The container needs no stylesheet.
+The service origins must allow your game's origin through CORS; on the hosted
+platform that list is kept by the platform team, so tell us the address your game is
+served from. `realtimeUrl` is an HTTP(S) base; the SDK derives WS/WSS URLs. The
+container needs no stylesheet.
+
+**Working on the SDK itself, or offline:** run `npm run build` and load
+`./dist/clan-sdk.js` (or `./dist/clan-sdk.esm.js`) from a local web server in place of
+the hosted URL, with the local service URLs (`http://localhost:8081`, `8082`, `8083`).
+
 Both formats support the same lifecycle:
 
 ```js
