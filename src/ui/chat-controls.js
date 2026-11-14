@@ -9,7 +9,19 @@ export function decorateChat(shadow,data) {
   const ready=state?.status==='connected'&&room&&!history?.loading&&!history?.error&&!state.pending&&!state.blocked?.[room]&&!(state.cooldownUntil>Date.now());
   const input=shadow.querySelector('[data-key="message"]');
   const button=shadow.querySelector('.sk-composer button');
-  if(button){button.disabled=!ready||!input?.value.trim();button.title=ready?'Send message':'Messaging unavailable';}
+  // Seconds left of a slow mode or rate limit wait, when it is long enough to be worth counting down
+  // (the controller decides: state.cooldownCountdown). 0 means: show the normal Send label.
+  const wait=state?.cooldownCountdown?Math.max(0,Math.ceil((state.cooldownUntil-Date.now())/1000)):0;
+  if(button){
+    button.disabled=!ready||!input?.value.trim();
+    // The label the shared UI drew is remembered once, so it can be put back when the wait is over.
+    if(button.dataset.sdkLabel===undefined)button.dataset.sdkLabel=button.textContent;
+    const label=wait>0?`${wait}s`:button.dataset.sdkLabel;
+    // Only write a changed value: the renderer watches this tree, and an unconditional write would loop.
+    if(button.textContent!==label)button.textContent=label;
+    const title=wait>0?`You can send again in ${wait}s`:ready?'Send message':'Messaging unavailable';
+    if(button.title!==title)button.title=title;
+  }
   let message=(data.tab==='clan'&&(data.sdkState?.leavePending?'Leaving clan…':data.sdkState?.leaveError))||state?.error||history?.error||state?.warning||'';
   if(!message)message=!state||state.status==='unavailable'?'Messaging is unavailable until transport is connected.':state.status==='connecting'?'Connecting to chat…':state.status!=='connected'?'Chat disconnected.':state.listLoading?'Loading conversations…':history?.loading?'Loading messages…':key&&!room?'No chat conversation is available for this clan.':!state.conversations.length?'No conversations yet.':room&&!data.threads?.[key]?.length?'No messages yet.':'';
   const status=shadow.querySelector('[data-sdk-status]');
@@ -18,4 +30,9 @@ export function decorateChat(shadow,data) {
 
   }
   return key;
+}
+/** Milliseconds until the countdown on the Send button changes next, or 0 when nothing is counting down. */
+export function nextCountdownTick(data,now=Date.now()) {
+  const state=data.sdkState?.chat,left=state?.cooldownCountdown?state.cooldownUntil-now:0;
+  return left>0?left%1000||1000:0;
 }

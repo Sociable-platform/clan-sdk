@@ -17,6 +17,11 @@ test:
     # GITLAB_NPM_TOKEN is the existing masked read-only group deploy token.
     - npm ci --no-audit --no-fund
     - npm test
+    # Bundle size: builds dist/clan-sdk.js and dist/clan-sdk.esm.js and prints the gzip size of each, for example
+    #   dist/clan-sdk.js: 38,200 bytes gzip (38.20 KB; target <60 KB)
+    # The job fails when a bundle reaches the 60 KB budget (scripts/build.mjs), so a size jump is seen here,
+    # before the image is built.
+    - npm run build
 
 images:
   stage: build
