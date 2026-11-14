@@ -1,14 +1,14 @@
 import {render, buildLabels} from '@clan/ui';
 import {widgetFonts} from './fonts.js';
 import {decorateFriends} from './friends-controls.js';
-import {decorateChat,selectedChatKey} from './chat-controls.js';
+import {decorateChat,nextCountdownTick,selectedChatKey} from './chat-controls.js';
 
 // Same source components/styles as dashboard preview. These small runtime hooks
 // bridge missing shared-package inputs; they never fetch/authenticate or invent data.
 export function createSharedRenderer(container, {onSearch = () => {}, onRetry = () => {}, onFriendSearch = () => {}, onFriendAction = () => {}, onFriendRefresh = () => {}, onChatSelect=()=>{},onChatSend=()=>Promise.reject(),onChatRefresh=()=>{},live = true} = {}) {
   let handle, shadow, observer;
   let data = {}, config = {}, destroyed = false;
-  let draftRoom,draftClan,purgeDraft=false;
+  let draftRoom,draftClan,purgeDraft=false,countdownTimer;
   const doc = container.ownerDocument;
   const fonts = widgetFonts(doc);
   const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
@@ -128,7 +128,13 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       }
     });
     if(data.tab==='friends')decorateFriends(shadow,data,labels);
-    if(data.tab==='chat'||data.tab==='clan'&&data.screen==='home')onChatSelect(decorateChat(shadow,data));
+    clearTimeout(countdownTimer);
+    if(data.tab==='chat'||data.tab==='clan'&&data.screen==='home'){
+      onChatSelect(decorateChat(shadow,data));
+      // While the Send button counts a wait down, come back when its number changes (a few ms late, so it has).
+      const tick=nextCountdownTick(data);
+      if(tick)countdownTimer=setTimeout(decorate,tick+5);
+    }
     else onChatSelect(null);
   }
   function send() {
@@ -201,6 +207,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearTimeout(countdownTimer);
       observer?.disconnect();
       shadow?.removeEventListener('input', input);
       shadow?.removeEventListener('click', click, true);

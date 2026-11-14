@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {init} from '../src/index.js';
-import {createChatController} from '../src/chat/controller.js';
+import {createChatController,COUNTDOWN_FROM_SECONDS} from '../src/chat/controller.js';
+import {decorateChat,nextCountdownTick} from '../src/ui/chat-controls.js';
 import {chatClient} from '../src/chat/client.js';
 import {recordingFetch,jsonResponse} from './helpers/recording-fetch.js';
 const me='7f1e0c2a-5b3d-4e8f-9a10-2b3c4d5e6f70',peer='5a2b3c4d-1e2f-4a3b-8c9d-0e1f2a3b4c5d',id='0193a6b4-7c1e-7d2a-9f10-2b3c4d5e6f70';
@@ -28,6 +29,45 @@ function setup(t,extra={}) {
  t.after(()=>controller.destroy());controller.configure(cfg,null);
  return {controller,client,sockets,flags,reads,state:()=>states.at(-1),hello:()=>sockets.at(-1).frame('hello',{playerId:me,configVersion:0,onlineFriends:[]})};
 }
+const slow=seconds=>({...cfg,chat:{...cfg.chat,slowModeSeconds:seconds}});
+async function sendAccepted(t,seconds) {
+ const f=setup(t);f.controller.configure(slow(seconds),null);await tick();f.hello();await tick();f.controller.select(peer);await tick();
+ const send=f.controller.send(peer,'hi');f.sockets[0].frame('message.ack',{replyTo:f.state().pending.id,messageId:'message-9'});await send;return f;
+}
+test('an accepted message starts the slow mode wait, counted down only from 4 seconds',async t=>{
+ assert.equal(COUNTDOWN_FROM_SECONDS,4);
+ for(const [seconds,countdown] of [[0,false],[1,false],[3,false],[4,true],[20,true]]){
+  const f=await sendAccepted(t,seconds);
+  assert.equal(f.state().cooldownUntil>0,seconds>0,`wait started for ${seconds}s`);assert.equal(f.state().cooldownCountdown,countdown,`countdown for ${seconds}s`);assert.equal(f.state().error,'');
+  if(seconds>0)await assert.rejects(f.controller.send(peer,'too soon'));
+ }
+});
+test('a rate limit always counts down; a slow mode rejection follows the game setting',async t=>{
+ for(const [seconds,code,countdown] of [[2,'slow_mode',false],[10,'slow_mode',true],[0,'rate_limited',true]]){
+  const f=setup(t);f.controller.configure(slow(seconds),null);await tick();f.hello();await tick();f.controller.select(peer);await tick();
+  const send=f.controller.send(peer,'hi');f.sockets[0].frame('error',{replyTo:f.state().pending.id,code,message:'Wait',retryAfterMs:900});await assert.rejects(send,e=>e.code===code);
+  assert.ok(f.state().cooldownUntil>0);assert.equal(f.state().cooldownCountdown,countdown,`${code} with slow mode ${seconds}s`);assert.equal(f.state().error,'');
+ }
+});
+test('the Send button shows the seconds left while counting down, and its own label otherwise',()=>{
+ const button={dataset:{},textContent:'Send',title:'',disabled:false},input={value:'draft'};
+ const shadow={querySelector:s=>s==='[data-key="message"]'?input:s==='.sk-composer button'?button:null,querySelectorAll:()=>[]};
+ const data=chat=>({tab:'clan',screen:'home',chatRooms:{clan:'room'},sdkState:{chat:{status:'connected',history:{},conversations:[{}],...chat}}});
+ decorateChat(shadow,data({cooldownUntil:Date.now()+5400,cooldownCountdown:true}));
+ assert.equal(button.textContent,'6s');assert.equal(button.disabled,true);assert.match(button.title,/send again in 6s/);
+ decorateChat(shadow,data({cooldownUntil:Date.now()+1400,cooldownCountdown:false}));
+ assert.equal(button.textContent,'Send');assert.equal(button.disabled,true);
+ decorateChat(shadow,data({cooldownUntil:0,cooldownCountdown:false}));
+ assert.equal(button.textContent,'Send');assert.equal(button.disabled,false);assert.equal(button.title,'Send message');
+});
+test('the countdown is refreshed when its number changes, and not at all without a countdown',()=>{
+ const data=chat=>({sdkState:{chat}});
+ assert.equal(nextCountdownTick(data({cooldownUntil:10400,cooldownCountdown:true}),5000),400);
+ assert.equal(nextCountdownTick(data({cooldownUntil:10000,cooldownCountdown:true}),5000),1000);
+ assert.equal(nextCountdownTick(data({cooldownUntil:10400,cooldownCountdown:false}),5000),0);
+ assert.equal(nextCountdownTick(data({cooldownUntil:4000,cooldownCountdown:true}),5000),0);
+ assert.equal(nextCountdownTick({}),0);
+});
 test('Realtime init is optional, validates URLs and makes no requests',t=>{
  const calls=recordingFetch(t);const options={socialUrl:'https://social.test',getPlayerToken:()=> 'token'};
  for(const realtimeUrl of ['ws://realtime.test','not-url','https://name:pass@host','https://host?token=x'])assert.throws(()=>init({...options,realtimeUrl}));
