@@ -40,7 +40,7 @@ npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
-new release just because `^0.1.0` allows one. To adopt a newer compatible release:
+new release just because `^0.1.30` allows one. To adopt a newer compatible release:
 
 ```sh
 npm update @clan/ui
@@ -50,7 +50,7 @@ npm run test:browser
 
 Include the resulting changed `package-lock.json` with every dependency update.
 Do not substitute `file:` links or copied repositories. The lockfile currently
-resolves registry release **0.1.1**, which is bundled into both browser formats.
+resolves registry release **0.1.30**, which is bundled into both browser formats.
 See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
 `npm run build` is the canonical build command. It uses esbuild and produces
@@ -110,6 +110,16 @@ docker build --progress=plain --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN 
 docker run --rm -d --name clan-sdk-ticket2-check -p 127.0.0.1:18080:8080 clan-sdk:ticket2
 ```
 
+Or use Compose, which builds the `clan-sdk` image and serves it on
+`127.0.0.1:18080`. Compose reads `GITLAB_NPM_TOKEN` from your shell or ignored
+root `.env` and passes it only as a build secret:
+
+```sh
+docker compose build --no-cache sdk
+docker compose up -d --no-deps --force-recreate sdk
+node scripts/check-image.mjs http://127.0.0.1:18080
+```
+
 The credential is a [BuildKit secret](https://docs.docker.com/build/building/secrets/),
 never a build argument or Dockerfile `ENV`. It is available only during `npm ci`.
 The committed `.npmrc` keeps its literal `${GITLAB_NPM_TOKEN}` placeholder. The
@@ -135,7 +145,7 @@ These checks use the actual nginx image; they do not contact Clan backends.
 
 | Paths (current release) | Successful response headers |
 | --- | --- |
-| `/0.1.0/clan-sdk.js`, `/0.1.0/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/0.1.1/clan-sdk.js`, `/0.1.1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
 | `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
 
 The exact version is read from `package.json` at build time. `/v1/` is the agreed
