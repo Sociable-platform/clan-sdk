@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clan SDK direct module bundle check</title>
+<h1>Standalone ES module</h1>
+<p id="summary" role="status">Running bundle-loading checks with mocked services…</p>
+<div id="social-widget"></div>
+<script type="module">
+  import {init, version} from '/dist/clan-sdk.esm.js';
+  import * as sdkExports from '/dist/clan-sdk.esm.js';
+  import {checkBundle} from './bundle-checks.js';
+  if (init !== sdkExports.init || version !== sdkExports.version) throw new Error('Named exports missing');
+  if (window.ClanSDK !== undefined) throw new Error('ES module leaked a global');
+  await checkBundle(sdkExports);
+</script>
+</html>

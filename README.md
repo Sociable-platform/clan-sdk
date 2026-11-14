@@ -34,8 +34,9 @@ Other shells can export an existing secret environment variable before running:
 
 ```sh
 npm ci
+npm run build
 npm test
-npm run test:browser
+npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
@@ -48,11 +49,39 @@ npm run test:browser
 ```
 
 Include the resulting changed `package-lock.json` with every dependency update.
-Do not substitute `file:` links or copied repositories. No SDK bundle/CDN build
-is introduced here. The lockfile currently resolves registry release **0.1.1**.
+Do not substitute `file:` links or copied repositories. The lockfile currently
+resolves registry release **0.1.1**, which is bundled into both browser formats.
 See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
-Open http://127.0.0.1:5174/ to execute the real-browser assertions. The script starts the server; it does not itself launch a browser or return a CLI test result. Set `BROWSER_TEST_PORT` if necessary. The server resolves the installed package's public export and serves its relative modules/styles/assets, without assuming a source directory layout. It prints the installed version at startup. There is no build script; `src/index.js` is the ESM entrypoint.
+`npm run build` is the canonical build command. It uses esbuild and produces
+`dist/clan-sdk.js` (classic script/IIFE) and `dist/clan-sdk.esm.js` (ES module).
+Each contains the published UI renderer and its Shadow DOM CSS. Both have a
+version banner read from `package.json`; the same version is exposed as
+`ClanSDK.version` or the ESM `version` export. All existing public exports remain
+available. Each output must be **under 60,000 bytes gzip**; the build prints both
+sizes and fails if either reaches that limit. No bundler, import map, React,
+separate UI stylesheet, or source checkout is needed by the consuming game.
+Standalone builds use the renderer's system font fallbacks and never fetch
+Google Fonts CSS. A game can supply fonts itself if it wants the curated faces.
+
+`npm run test:bundle` requires a completed build. It launches headless Chromium
+(or installed Chrome/Edge), starts the plain Node HTTP server on a temporary
+port, and checks both built files on isolated HTML pages without import maps.
+It checks API/version parity, a visible styled panel, token/service URL handling,
+and rejects any extra SDK code or stylesheet requests. It then runs the existing
+browser regression suite against the built ESM output. These are **bundle-loading
+and regression tests with mocked Platform/Social/Realtime services**, not live
+backend verification. Screenshots are written to `test/browser/artifacts/`.
+If no browser is installed, run `npx playwright install chromium`; optionally set
+`BROWSER_CHANNEL=chrome` or `msedge` to select an installed browser.
+
+`npm run test:browser` still serves the original source-mode tests at
+http://127.0.0.1:5174/. It starts a server without launching a browser; open the
+page to execute the assertions. Set `BROWSER_TEST_PORT` if necessary. Its import
+map serves the installed UI package for development/comparison only. After a
+build, the standalone pages are available at `/test/browser/bundle-iife.html`
+and `/test/browser/bundle-esm.html` on the same plain HTTP server. No Vite server
+is used. `src/index.js` remains the source/package entry point.
 
 CI: no installation pipeline file was found in this SDK checkout. Configure
 `GITLAB_NPM_TOKEN` as a **masked secret CI/CD variable** in GitLab (protected where
@@ -65,23 +94,74 @@ credentials. No CI pipeline was run or claimed passing for this migration.
 
 ## Minimal game integration
 
-Use a bundler that resolves the SDK's ESM dependencies; the local test server provides an import map for native-browser development.
+Copy either built file into your game's `dist/` directory and serve the page over
+HTTP(S). The examples below use local service URLs; replace the game ID with one
+that has a published widget configuration. The example `/api/player-token`
+endpoint belongs to **your game server**: it must return `{ "token": "..." }`
+for the signed-in player and honor `forceRefresh=true`. It is not a Clan route.
+
+### Classic script
+
+```html
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<div id="social-widget"></div>
+<script src="./dist/clan-sdk.js"></script>
+<script>
+  const sdk = ClanSDK.init({
+    gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
+    platformUrl: 'http://localhost:8081',
+    socialUrl: 'http://localhost:8082',
+    realtimeUrl: 'http://localhost:8083',
+    getPlayerToken: async ({forceRefresh}) => {
+      const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Player authentication failed');
+      return (await response.json()).token;
+    },
+  });
+  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  widget.ready.catch(console.error);
+  console.log(ClanSDK.version);
+</script>
+</html>
+```
+
+### Direct browser ES module
+
+```html
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<div id="social-widget"></div>
+<script type="module">
+  import {init, version} from './dist/clan-sdk.esm.js';
+  const sdk = init({
+    gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
+    platformUrl: 'http://localhost:8081',
+    socialUrl: 'http://localhost:8082',
+    realtimeUrl: 'http://localhost:8083',
+    getPlayerToken: async ({forceRefresh}) => {
+      const response = await fetch(`/api/player-token?forceRefresh=${forceRefresh}`, {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Player authentication failed');
+      return (await response.json()).token;
+    },
+  });
+  const widget = sdk.mountExperience({container: document.querySelector('#social-widget')});
+  await widget.ready;
+  console.log(version);
+</script>
+</html>
+```
+
+The service origins must allow your game's origin through CORS. `realtimeUrl`
+is an HTTP(S) base; the SDK derives WS/WSS URLs. The container needs no stylesheet.
+Both formats support the same lifecycle:
 
 ```js
-import {init} from './src/index.js'; // or your installed SDK package
-
-const sdk = init({
-  gameId: '797ed3c3-50ff-49be-ba96-111b493beb82',
-  platformUrl: 'http://localhost:8081',
-  socialUrl: 'http://localhost:8082',
-  realtimeUrl: 'http://localhost:8083', // HTTP(S) base; SDK derives ws/wss
-  getPlayerToken: async ({forceRefresh}) => obtainPlayerTokenFromGameServer({forceRefresh}),
-});
-
 const container = document.querySelector('#social-widget');
-const widget = sdk.mountExperience({container});
-await widget.ready;
-
 // Optional host notification. The SDK owns Join/Create/search/navigation.
 container.addEventListener('clan-sdk:joined', event => {
   console.log('Joined clan', event.detail.clanId);
@@ -93,7 +173,7 @@ await widget.refreshConfig();
 widget.destroy();
 ```
 
-`obtainPlayerTokenFromGameServer` is a host-supplied function, not an SDK method or a suggested backend URL. Keep the secret API key and player-token exchange on the game server. Return only the token string, without the `Bearer` prefix. No developer token is needed by W6. The SDK never decodes JWTs or implements registration. Opening the live Friends tab uses the confirmed `GET /players/me` bootstrap for Social identity; init and clan-only flows do not add that request.
+Keep the secret API key and player-token exchange on the game server. The callback must return only the token string, without the `Bearer` prefix. No developer token is needed by W6. The SDK never decodes JWTs or implements registration. Opening the live Friends tab uses the confirmed `GET /players/me` bootstrap for Social identity; init and clan-only flows do not add that request.
 
 `init()` is synchronous and requests neither config nor tokens. Both `gameId` and `platformUrl` are required together to enable Platform loading. `socialUrl` and `getPlayerToken` retain their existing validation. Service URLs are absolute HTTP(S), optionally with a proxy prefix; omit `/api/v1`. Trailing slashes are supported; URL credentials, queries and fragments are rejected.
 
@@ -122,7 +202,7 @@ Initial loading failures (network, timeout, HTTP, JSON/envelope or render errors
 Current widget JSON may be unwrapped or wrapped in one top-level `config` object:
 
 ```js
-import {normalizeWidgetConfig} from './src/index.js';
+import {normalizeWidgetConfig} from './dist/clan-sdk.esm.js';
 const normalized = normalizeWidgetConfig(JSON.parse(editorText));
 // Both mount and updateConfig also normalize automatically:
 const widget = sdk.mountExperience({container, config: {config: currentConfig}});
@@ -151,14 +231,14 @@ Direct mount is synchronous and has no `ready` or `refreshConfig`; Platform moun
 
 Destroy is idempotent, removes only SDK-owned DOM/listeners/font references, cancels config work, invalidates pending Social completions/timers, and allows remount. The Social methods do not expose AbortSignal, so pending Social HTTP may finish, but its late result cannot update destroyed UI. Container reservation is shared across legacy/current mounts. The shared widget owns its Shadow DOM and constant stylesheet. A thin SDK stage preserves host-page content and protects the mount from ordinary host CSS; transformed ancestors still obey normal fixed-position rules.
 
-Curated Google font families use the same `googleFontsHref` as dashboard preview. The SDK adds reference-counted stylesheet links to the owning document and removes its own links on update/destroy. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
+Source/package integrations load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Standalone bundles omit those external links and use the renderer's system font fallbacks. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
 
 ## Supported shared UI and runtime data
 
 | Config | Shared presentation behavior |
 | --- | --- |
 | `theme.colors` | Brand, panel background, surface, text and muted colors |
-| `theme.fonts` | Curated heading/body families and corresponding font stylesheet |
+| `theme.fonts` | Curated heading/body families with system fallbacks; source integrations also load Google Fonts |
 | `theme.frame/buttons/panel` | Frame, corners, button styles/case, opacity and blur |
 | `theme.textures/components` | Shared built-in textures, safe mapped custom assets and per-part overrides |
 | `layout.position`, `startCollapsed` | **bottom-left/bottom-right** dock and launcher state. Current schema has no numeric width/height or top corners; the shared component owns responsive sizing |

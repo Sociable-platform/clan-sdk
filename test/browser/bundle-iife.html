@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clan SDK classic script bundle check</title>
+<h1>Standalone classic script</h1>
+<p id="summary" role="status">Running bundle-loading checks with mocked services…</p>
+<div id="social-widget"></div>
+<script src="/dist/clan-sdk.js"></script>
+<script type="module">
+  import {checkBundle} from './bundle-checks.js';
+  await checkBundle(window.ClanSDK);
+</script>
+</html>
