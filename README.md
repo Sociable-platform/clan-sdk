@@ -309,7 +309,7 @@ Source/package integrations load curated Google font families with the same `goo
 | `clan.screens.home.showStats` | Shared Home details; SDK suppresses unsupported live level/XP data |
 | `texts.terms/labels` | Shared label overrides and `{Clan}`/`{clan}`/`{Clans}`/`{clans}` substitution |
 | Ordered `clan.badges.allowed` / `clan.roles` | Shared picker/role presentation order; runtime permission authority remains backend |
-| Chat layout/limits | Shared bubbles/log/composer; live Realtime integration below. Server enforces filtering, permissions and slow mode |
+| Chat layout/limits | Shared bubbles/log/composer; live Realtime integration below. Server enforces filtering, permissions and slow mode. The SDK mirrors slow mode: after each sent message Send is disabled for the game's `chat.slowModeSeconds`, and from 4 seconds up the button counts the wait down (`12s`, `11s`, …). A wait the server reports (`slow_mode`, `rate_limited`) is handled the same way; no warning text or Retry button is shown for it |
 
 There is **no generic screen/section/tab order field** in the current schema. Old prototype section arrays/hero layouts are not a second design system. Unknown fields remain in config; the renderer only consumes its supported fields. Minimal direct checks are not a full copy of the frontend's proposed strict JSON Schema validator and do not enforce permissions.
 
