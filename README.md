@@ -83,14 +83,76 @@ build, the standalone pages are available at `/test/browser/bundle-iife.html`
 and `/test/browser/bundle-esm.html` on the same plain HTTP server. No Vite server
 is used. `src/index.js` remains the source/package entry point.
 
-CI: no installation pipeline file was found in this SDK checkout. Configure
-`GITLAB_NPM_TOKEN` as a **masked secret CI/CD variable** in GitLab (protected where
-appropriate for your branch policy), using the read-only deploy token above.
-An install job should run `npm ci` followed by `npm test`, after the generated
-lockfile is committed. Do not echo the variable or enable shell tracing around
-credentials. No CI pipeline was run or claimed passing for this migration.
+CI uses the committed `.gitlab-ci.yml` to run `npm ci`/`npm test`, then build and
+publish the asset-server image. Configure `GITLAB_NPM_TOKEN` as a **masked secret
+CI/CD variable**, using the read-only group deploy token above; protect it where
+appropriate for branch policy. It must be available to any publishing job you
+start. The Docker build receives it only through a BuildKit secret. Do not echo
+it or enable shell tracing around credentials.
 
 `npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock. Actual current results are in [shared renderer notes](docs/shared-renderer.md).
+
+## Docker asset server
+
+The multi-stage Dockerfile builds from source with Node 22 (`npm ci` followed by
+the canonical `npm run build`), then copies only the two generated bundles and
+nginx configuration into `nginxinc/nginx-unprivileged:1.28-alpine`. The server runs
+as the image's unprivileged user on port **8080**, matching Studio's service port.
+The Node build runs on the builder's native CPU; the same JavaScript can be
+packaged in either runtime architecture without QEMU. `.dockerignore` allows only
+build inputs, excluding local `node_modules`, `dist`, `.git` and private env files.
+No local bundle directory is required.
+
+With `GITLAB_NPM_TOKEN` already set in your shell as described above:
+
+```sh
+docker build --progress=plain --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN -t clan-sdk:ticket2 .
+docker run --rm -d --name clan-sdk-ticket2-check -p 127.0.0.1:18080:8080 clan-sdk:ticket2
+```
+
+The credential is a [BuildKit secret](https://docs.docker.com/build/building/secrets/),
+never a build argument or Dockerfile `ENV`. It is available only during `npm ci`.
+The committed `.npmrc` keeps its literal `${GITLAB_NPM_TOKEN}` placeholder. The
+runtime has no Node/npm, credentials or SDK source checkout.
+
+Repeat the actual HTTP header checks (use `curl.exe` in Windows PowerShell):
+
+```sh
+VERSION=$(node -p "require('./package.json').version")
+curl -I http://127.0.0.1:18080/v1/clan-sdk.js
+curl -I "http://127.0.0.1:18080/$VERSION/clan-sdk.js"
+curl -I http://127.0.0.1:18080/v1/clan-sdk.esm.js
+curl -I "http://127.0.0.1:18080/$VERSION/clan-sdk.esm.js"
+node scripts/check-image.mjs http://127.0.0.1:18080
+docker stop clan-sdk-ticket2-check
+```
+
+In PowerShell, set the version with `$sdkVersion = node -p "require('./package.json').version"`
+and use `$sdkVersion` in the exact-version URLs. `check-image.mjs` checks both HEAD
+and GET headers, compares downloaded alias/version bytes for both files, checks
+the package-version banners, and verifies missing/private paths return 404.
+These checks use the actual nginx image; they do not contact Clan backends.
+
+| Paths (current release) | Successful response headers |
+| --- | --- |
+| `/0.1.0/clan-sdk.js`, `/0.1.0/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
+
+The exact version is read from `package.json` at build time. `/v1/` is the agreed
+moving alias even for version `0.1.0`; each alias/version pair has identical bytes
+inside one image. **Changed bundle bytes require a new exact release version.**
+Do not rebuild different bytes under a previously released immutable path.
+
+The `images` CI job follows the team's Docker 27/DinD + buildx TLS-context setup:
+automatic on `develop`/`main`, manual on merge request pipelines. It publishes one
+multi-platform image for `linux/amd64,linux/arm64` with the full commit SHA tag:
+`$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA`, resolving in this project to
+`<registry>/clan-platform/clan-sdk/sdk:<sha>`. Login uses `CI_REGISTRY_USER`,
+`CI_REGISTRY_PASSWORD` and `CI_REGISTRY`. It requires a Docker runner configured
+for privileged DinD with the team's shared `/certs/client` TLS setup. The job
+prints `docker buildx imagetools inspect` after pushing; publication and the
+registry's two platform manifests must be checked in GitLab CI. No pipeline was
+run or image published as part of local verification.
 
 ## Minimal game integration
 

@@ -1,0 +1,46 @@
+# Same test/build stages, branch rules and Docker-in-Docker setup as clan-backend.
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  image: node:22-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+  script:
+    # GITLAB_NPM_TOKEN is the existing masked read-only group deploy token.
+    - npm ci --no-audit --no-fund
+    - npm test
+
+images:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    PLATFORMS: linux/amd64,linux/arm64
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker context create tls-environment
+    - docker buildx create --use --driver docker-container tls-environment
+  script:
+    - |
+      set -eu
+      : "${GITLAB_NPM_TOKEN:?Set the masked read-only package registry token}"
+      docker buildx build \
+        --platform "$PLATFORMS" \
+        --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN \
+        --tag "$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA" \
+        --push .
+      # Inspect the pushed index; both target platforms must be present.
+      docker buildx imagetools inspect "$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA"
