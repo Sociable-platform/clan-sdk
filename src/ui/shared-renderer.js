@@ -30,13 +30,6 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     const content = shadow.querySelector('.sk-content');
     if (!content) return;
     let status = content.querySelector('[data-sdk-status]');
-    if (!status) {
-      status = doc.createElement('div');
-      status.dataset.sdkStatus = '';
-      status.setAttribute('role', 'status');
-      status.setAttribute('aria-live', 'polite');
-      content.append(status);
-    }
     let message = state.leavePending?'Leaving clan…':state.leaveError || state.error || state.joinError || '';
     if (data.tab === 'friends') {
       const friends=state.friends;
@@ -49,22 +42,30 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     else if (state.profilePending || state.status === 'loading' && data.screen === 'discover') message ||= 'Loading clans…';
     else if (data.screen === 'discover' && state.status === 'empty') message ||= 'No clans found.';
     if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : '';
+    const chatVisible=data.tab==='chat'||data.tab==='clan'&&data.screen==='home';
+    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error');
+    // Do not leave an empty flex row/gap after the Blocked section. Create the
+    // status only when needed, so the mutation observer cannot append/remove it
+    // repeatedly. Other screens retain their chat/status decoration hooks.
+    if(data.tab==='friends'&&!message&&!canRetry){status?.remove();status=undefined;}
+    else if(!status){
+      status=doc.createElement('div');status.dataset.sdkStatus='';
+      status.setAttribute('role','status');status.setAttribute('aria-live','polite');content.append(status);
+    }
     // Child-list observation also catches the shared launcher's internal repaints.
     // Only write changed text; unconditional replaceChildren would loop forever.
-    if (message!==null && status.firstChild?.textContent !== message) {
+    if (status && message!==null && status.firstChild?.textContent !== message) {
       const text = doc.createElement('span');
       text.textContent = message;
       status.replaceChildren(text);
     }
-    const chatVisible=data.tab==='chat'||data.tab==='clan'&&data.screen==='home';
-    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error');
     if (canRetry && !status.querySelector('[data-sdk-retry]')) {
       const retry = doc.createElement('button');
       retry.type = 'button';
       retry.textContent = 'Retry';
       retry.dataset.sdkRetry = '';
       status.append(retry);
-    } else if (!canRetry) status.querySelector('[data-sdk-retry]')?.remove();
+    } else if (!canRetry) status?.querySelector('[data-sdk-retry]')?.remove();
 
     shadow.querySelectorAll('.sk-composer button').forEach(button => {
       button.disabled = true;
@@ -152,7 +153,6 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
   const click = event => {
     const friend=event.target.closest?.('[data-friend-action]');
     if(friend){event.preventDefault();event.stopImmediatePropagation();if(!friend.disabled)onFriendAction(friend.dataset.friendAction,friend.dataset.friendId);return;}
-    if(event.target.closest?.('[data-friend-refresh]')){onFriendRefresh();return;}
     if (event.target.closest?.('[data-sdk-retry]')) {if(data.tab==='friends')onFriendRefresh();else if(data.tab==='chat'||data.screen==='home')onChatRefresh();else onRetry();}
     if (event.target.closest?.('.sk-composer button')) {
       if(live){event.preventDefault(); event.stopImmediatePropagation();send();}

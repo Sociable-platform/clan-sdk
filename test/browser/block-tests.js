@@ -40,9 +40,10 @@ export function registerBlockTests({test,assert,container}) {
   finally {handles.forEach(h=>h.destroy());window.fetch=oldFetch;window.WebSocket=oldSocket;}
  }
  test('shared Block confirmation updates friends/blocked counts; Unblock does not restore friendship',()=>fixture(async({mount,calls,clickBlock})=>{
-  const {root}=mount();await waitFor(()=>root.querySelector('[data-friend-action="remove"]')&&!root.querySelector('.sk-friend-select').disabled);clickBlock(root);
+  const {root}=mount();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));clickBlock(root);
   await waitFor(()=>root.querySelector('[data-key="blocked-toggle"]').textContent.includes('1'));
   assert(root.querySelector('.sk-section').textContent==='Friends · 0','Friend count stale');
+  assert(!root.querySelector('[data-friend-action="remove"], [data-friend-refresh]')&&!root.textContent.includes('Refresh friends'),'Standalone actions rendered after Block');
   const posts=calls.filter(c=>c.method==='POST');assert(posts.length===1&&posts[0].url.endsWith(`/players/${friend.id}/block`)&&posts[0].body===undefined,'Wrong block request or duplicate');
   assert(posts[0].headers.Authorization==='Bearer synthetic-block-token','Player token not used');
   root.querySelector('[data-key="blocked-toggle"]').click();const unblock=root.querySelector('.sk-blocked-list button');unblock.click();unblock.click();
@@ -59,7 +60,7 @@ export function registerBlockTests({test,assert,container}) {
   assert(root.querySelector('[data-key="blocked-toggle"]').textContent.includes('0'),'Blocked count not refreshed after search Unblock');
  },undefined,{blocked:true}));
  for(const action of ['block','unblock'])test(`${action} failures stay readable without fake list/count changes`,()=>fixture(async({mount,clickBlock,calls})=>{
-  const {root}=mount();await waitFor(()=>root.querySelector('[data-friend-action="remove"]')||root.querySelector('[data-key="blocked-toggle"]').textContent.includes('1'));
+  const {root}=mount();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)')||root.querySelector('[data-key="blocked-toggle"]').textContent.includes('1'));
   if(action==='block')clickBlock(root);else{root.querySelector('[data-key="blocked-toggle"]').click();root.querySelector('.sk-blocked-list button').click();}
   await waitFor(()=>root.textContent.includes('Synthetic '+action+' failed'));
   assert(root.querySelector('.sk-section').textContent===`Friends · ${action==='block'?1:0}`,'Failed action changed friend count');
@@ -68,7 +69,7 @@ export function registerBlockTests({test,assert,container}) {
  },path=>path.endsWith('/block')?json({error:{code:'unavailable',message:'Synthetic '+action+' failed'}},503):undefined,{blocked:action==='unblock'}));
  test('pending block stays guarded during realtime refresh and cannot update a destroyed widget',()=>{
   const pending=deferred();return fixture(async({mount,calls,clickBlock,store})=>{
-   const {root,handle,target}=mount();await waitFor(()=>root.querySelector('[data-friend-action="remove"]')&&!root.querySelector('.sk-friend-select').disabled);clickBlock(root);
+   const {root,handle,target}=mount();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));clickBlock(root);
    await sleep(10);assert(root.querySelector('.sk-friend-select').disabled,'Pending management enabled');
    void handle.refreshFriends();assert(calls.filter(c=>c.method==='POST').length===1,'Duplicate pending Block');
    handle.destroy();store.friends=[];store.blocks=[friend];pending.resolve(new Response(null,{status:204}));await sleep(30);
@@ -77,18 +78,18 @@ export function registerBlockTests({test,assert,container}) {
  });
  test('blocking clears an open DM/draft, ignores stale room events, and Unblock does not reopen it',()=>fixture(async({mount,sockets,clickBlock})=>{
   const wait=async(label,predicate)=>{try{await waitFor(predicate);}catch{throw new Error(`${label}: ${root.querySelector('.sk-content')?.textContent}`);}};
-  const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('[data-friend-action="remove"]')&&!root.querySelector('.sk-friend-select').disabled);
+  const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
   const tab=name=>[...root.querySelectorAll('.sk-tab')].find(b=>b.textContent===name).click();
   tab('Chat');await wait('open DM',()=>root.textContent.includes('Existing direct message'));type(root,'message','Private unsent draft');
-  tab('Friends');await handle.refreshFriends();clickBlock(root);
+  tab('Friends');await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));clickBlock(root);
   await wait('block completion',()=>root.querySelector('[data-key="blocked-toggle"]').textContent.includes('1'));tab('Chat');
   assert(!root.querySelector('.sk-chip')&&!root.querySelector('[data-key="message"]'),'Blocked DM remained open');
   sockets[0].frame('conversation.added',{conversation:room});await sleep(20);assert(!root.querySelector('.sk-chip'),'Stale event restored blocked DM');
-  tab('Friends');await handle.refreshFriends();root.querySelector('[data-key="blocked-toggle"]').click();root.querySelector('.sk-blocked-list button').click();
+  tab('Friends');await waitFor(()=>!root.textContent.includes('Loading friends'));root.querySelector('[data-key="blocked-toggle"]').click();root.querySelector('.sk-blocked-list button').click();
   await wait('unblock completion',()=>root.querySelector('[data-key="blocked-toggle"]').textContent.includes('0'));tab('Chat');assert(!root.querySelector('.sk-chip'),'Unblock restored DM membership');
  },undefined,{chat:true}));
  test('reconnect refreshes blocked state while Chat is visible, using current server collections',()=>fixture(async({mount,store,sockets})=>{
-  const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('[data-friend-action="remove"]')&&!root.querySelector('.sk-friend-select').disabled);
+  const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
   [...root.querySelectorAll('.sk-tab')].find(b=>b.textContent==='Chat').click();await waitFor(()=>root.querySelector('[data-key="message"]'));
   store.friends=[];store.blocks=[friend];store.rooms=[];
   handle.reconnectChat();await waitFor(()=>sockets.length===2);sockets[1].hello();await waitFor(()=>!root.querySelector('.sk-chip'));

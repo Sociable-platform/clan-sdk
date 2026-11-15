@@ -61,6 +61,8 @@ try {
  browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL??'chrome',headless:true});
  const pages=await Promise.all(['A','B'].map(async role=>{const page=await browser.newPage();await page.goto(origin+'/?player='+role);await page.waitForFunction(()=>window.root?.()?.querySelector('.sk-friend-select:not(:disabled)'));return page;}));
  const [pa,pb]=pages;
+ for(const page of pages)assert.equal(await page.evaluate(()=>!root().querySelector('[data-friend-action="remove"], [data-friend-refresh], [data-sdk-status]')&&root().querySelector('.sk-friend').children.length===1),true);
+ pass('compact Friends rows have no standalone Remove/Refresh controls or empty status row');
  const tab=async(page,name)=>page.evaluate(name=>[...root().querySelectorAll('.sk-tab')].find(b=>b.textContent===name).click(),name);
  await tab(pa,'Chat');await tab(pb,'Chat');
  await pa.waitForFunction(()=>root().querySelector('[data-key="message"]')&&!root().textContent.includes('Loading messages'));
@@ -68,7 +70,7 @@ try {
  await pa.evaluate(body=>{const input=root().querySelector('[data-key="message"]');input.value=body;input.dispatchEvent(new Event('input',{bubbles:true}));root().querySelector('.sk-composer button').click();},body);
  await pb.waitForFunction(body=>root().querySelector('.sk-chat')?.textContent.includes(body),body);
  pass('built ESM rendered both players and delivered a real message over websocket');
- await tab(pa,'Friends');await pa.evaluate(()=>widget.refreshFriends());
+ await tab(pa,'Friends');await pa.waitForFunction(()=>root().querySelector('.sk-friend-select:not(:disabled)'));
  await pa.evaluate(()=>{root().querySelector('.sk-friend-select').click();[...root().querySelectorAll('.sk-member-panel button')].find(b=>b.textContent==='Block').click();[...root().querySelectorAll('[role="alertdialog"] button')].find(b=>b.textContent==='Block').click();});
  await pa.waitForFunction(()=>root().querySelector('[data-key="blocked-toggle"]')?.textContent.includes('1'));
  assert.equal((await clients.A.listBlocks()).blocks[0].id,b.id);
@@ -93,6 +95,12 @@ try {
  await wait(async()=> (await clients.A.listConversations()).conversations.some(c=>c.id===room.id));
  await tab(pa,'Chat');await pa.waitForFunction(body=>root().querySelector('.sk-chat')?.textContent.includes(body),body);
  pass('explicit re-friending restored the existing DM/history per backend contract');
+ await tab(pa,'Friends');await pa.waitForFunction(()=>root().querySelector('.sk-friend-select:not(:disabled)'));
+ await pa.evaluate(()=>{root().querySelector('.sk-friend-select .sk-avatar').click();[...root().querySelectorAll('.sk-member-panel button')].find(b=>b.textContent==='Remove friend').click();[...root().querySelectorAll('[role="alertdialog"] button')].find(b=>b.textContent==='Remove').click();});
+ await pa.waitForFunction(()=>root().querySelector('.sk-section').textContent==='Friends · 0'&&!root().textContent.includes('Loading friends'));
+ await pb.waitForFunction(()=>!root().querySelector('.sk-chip'));
+ assert.equal((await clients.A.listFriends()).friends.length,0);assert.equal((await clients.B.listFriends()).friends.length,0);
+ pass('native Remove menu updates both friend lists/counts and removes the remote DM without manual refresh');
 } catch(error) {
  // Browser/transport error strings may contain authenticated websocket URLs.
  console.error('FAIL live TEAM-250 check: '+(error.code??error.name??'verification_error'));process.exitCode=1;

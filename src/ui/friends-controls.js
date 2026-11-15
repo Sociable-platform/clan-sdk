@@ -49,15 +49,8 @@ export function decorateFriends(shadow,data,labels) {
       action(row,'accept',player.requestId,labels.accept);action(row,'decline',player.requestId,'Decline');
     }else if(player.relation==='none')action(row,'send',player.id,'Add friend');
     else if(player.relation==='blocked')action(row,'unblock',player.id,'Unblock');
-    else {action(row,'remove',player.id,'Remove friend');row.querySelector('[data-friend-action="remove"]').hidden=Boolean(row.querySelector('.sk-member-panel'));}
   });
   shadow.querySelectorAll('.sk-blocked-list button').forEach(button=>{button.disabled=busy;});
   const section=shadow.querySelector('.sk-content > .sk-section');
   if(searching)text(section,`Players · ${data.friends?.length??0}`);
-  const status=shadow.querySelector('[data-sdk-status]');
-  if(status&&!status.querySelector('[data-friend-refresh]')){
-    const refresh=doc.createElement('button');refresh.type='button';refresh.className='sk-btn sk-btn-ghost';refresh.dataset.friendRefresh='';refresh.textContent='Refresh friends';status.append(refresh);
-  }
-  const refresh=status?.querySelector('[data-friend-refresh]');
-  if(refresh)refresh.disabled=Boolean(state.pending)||state.status==='loading';
 }

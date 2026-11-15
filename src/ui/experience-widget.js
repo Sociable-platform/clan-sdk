@@ -56,7 +56,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   const unsubscribe=live?playerSession(sdk)?.subscribe(()=>{
     controller.destroy();friends.destroy();chat.destroy();renderer.destroy();boot();
   }):undefined;
-  const visible=()=>chat.markRead();
+  const visible=()=>{chat.markRead();if(doc.visibilityState!=='hidden')void friends.refresh({background:true});};
   if(live)doc.addEventListener('visibilitychange',visible);
   function destroy(){if(destroyed)return;destroyed=true;unsubscribe?.();doc.removeEventListener('visibilitychange',visible);controller.destroy();friends.destroy();chat.destroy();renderer.destroy();host.remove();releaseContainer(container);}
   return {
