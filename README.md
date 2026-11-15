@@ -61,19 +61,28 @@ version banner read from `package.json`; the same version is exposed as
 available. Each output must be **under 60,000 bytes gzip**; the build prints both
 sizes and fails if either reaches that limit. No bundler, import map, React,
 separate UI stylesheet, or source checkout is needed by the consuming game.
-Standalone builds use the renderer's system font fallbacks and never fetch
-Google Fonts CSS. A game can supply fonts itself if it wants the curated faces.
+All formats load the configured curated heading/body fonts automatically from
+Google Fonts, matching the dashboard preview. UI styles stay inside the bundle;
+the font stylesheet and font files are fetched at runtime. If your game uses
+CSP, allow `https://fonts.googleapis.com` in `style-src` and
+`https://fonts.gstatic.com` in `font-src`. System fonts remain the fallback when
+font delivery is unavailable.
 
 `npm run test:bundle` requires a completed build. It launches headless Chromium
 (or installed Chrome/Edge), starts the plain Node HTTP server on a temporary
 port, and checks both built files on isolated HTML pages without import maps.
 It checks API/version parity, a visible styled panel, token/service URL handling,
-and rejects any extra SDK code or stylesheet requests. It then runs the existing
+and rejects extra SDK code or UI stylesheet requests. Google font CSS is mocked
+while its configured families and link lifecycle are checked. It then runs the existing
 browser regression suite against the built ESM output. These are **bundle-loading
 and regression tests with mocked Platform/Social/Realtime services**, not live
 backend verification. Screenshots are written to `test/browser/artifacts/`.
 If no browser is installed, run `npx playwright install chromium`; optionally set
 `BROWSER_CHANNEL=chrome` or `msedge` to select an installed browser.
+For an opt-in real Google Fonts delivery check, set `BUNDLE_LIVE_FONTS=1` when
+running `npm run test:bundle` (PowerShell: `$env:BUNDLE_LIVE_FONTS='1'`). This
+loads Bangers/Silkscreen font files in both formats and verifies loaded font
+faces. Platform/Social/Realtime responses remain mocked in this mode.
 
 `npm run test:browser` still serves the original source-mode tests at
 http://127.0.0.1:5174/. It starts a server without launching a browser; open the
@@ -370,14 +379,14 @@ Direct mount is synchronous and has no `ready` or `refreshConfig`; Platform moun
 
 Destroy is idempotent, removes only SDK-owned DOM/listeners/font references, cancels config work, invalidates pending Social completions/timers, and allows remount. The Social methods do not expose AbortSignal, so pending Social HTTP may finish, but its late result cannot update destroyed UI. Container reservation is shared across legacy/current mounts. The shared widget owns its Shadow DOM and constant stylesheet. A thin SDK stage preserves host-page content and protects the mount from ordinary host CSS; transformed ancestors still obey normal fixed-position rules.
 
-Source/package integrations load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Standalone bundles omit those external links and use the renderer's system font fallbacks. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
+All formats load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Config updates load the newly selected families; multiple widgets share a stylesheet until its last user is destroyed or switches fonts. System fallbacks remain available. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
 
 ## Supported shared UI and runtime data
 
 | Config | Shared presentation behavior |
 | --- | --- |
 | `theme.colors` | Brand, panel background, surface, text and muted colors |
-| `theme.fonts` | Curated heading/body families with system fallbacks; source integrations also load Google Fonts |
+| `theme.fonts` | Curated heading/body families loaded automatically in all formats, with system fallbacks |
 | `theme.frame/buttons/panel` | Frame, corners, button styles/case, opacity and blur |
 | `theme.textures/components` | Shared built-in textures, safe mapped custom assets and per-part overrides |
 | `layout.position`, `startCollapsed` | **bottom-left/bottom-right** dock and launcher state. Current schema has no numeric width/height or top corners; the shared component owns responsive sizing |
