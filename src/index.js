@@ -25,6 +25,9 @@ class SDK {
   declineFriendRequest(id) { return clients.get(this).friends.declineFriendRequest(id); }
   cancelFriendRequest(id) { return clients.get(this).friends.cancelFriendRequest(id); }
   removeFriend(id) { return clients.get(this).friends.removeFriend(id); }
+  listBlocks() { return clients.get(this).friends.listBlocks(); }
+  blockPlayer(id) { return clients.get(this).friends.blockPlayer(id); }
+  unblockPlayer(id) { return clients.get(this).friends.unblockPlayer(id); }
   resetPlayerSession() { clients.get(this).session.reset(); }
   mountExperience(options) {
     const load = platformLoaders.get(this);

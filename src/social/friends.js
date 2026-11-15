@@ -1,4 +1,4 @@
-// Social develop bdfc3d3, openapi/social.yaml. Responses pass through unchanged.
+// Social openapi/social.yaml; checked revisions are recorded in docs. Responses pass through unchanged.
 export function createFriendsClient(request) {
   const id = (value, field) => {
     if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..') throw new TypeError(`${field} must be a non-empty ID string, excluding dot path segments.`);
@@ -8,6 +8,9 @@ export function createFriendsClient(request) {
     getMyPlayer: () => request('/api/v1/players/me'),
     listFriends: () => request('/api/v1/friends'),
     listFriendRequests: () => request('/api/v1/friends/requests'),
+    listBlocks: () => request('/api/v1/players/me/blocks'),
+    blockPlayer: playerId => request(`/api/v1/players/${id(playerId,'playerId')}/block`, {method:'POST'}),
+    unblockPlayer: playerId => request(`/api/v1/players/${id(playerId,'playerId')}/block`, {method:'DELETE'}),
     searchPlayers({q,limit} = {}) {
       if (typeof q !== 'string') throw new TypeError('q must be a string.');
       if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) throw new TypeError('limit must be an integer from 1 to 100.');

@@ -28,20 +28,20 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     const searching=state?.tab==='friends'&&Boolean(friendState?.query.trim());
     const self=chatState?.conversations.flatMap(room=>room.members).find(member=>member.id===chatState.playerId);
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:state?.members??[],messages:view.messages,
-      friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
+      friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
-      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id)}};
+      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id)}};
   }
   const render=()=>renderer.update(current,data());
   const defaultTab=()=>current.clan?.enabled===true?'clan':current.friends?.enabled===true?'friends':'chat';
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
     renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body),onChatRefresh:()=>chat.refresh()});
-    chat=createChatController({client:chatClient(sdk),isVisible:()=>doc.visibilityState!=='hidden',onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh(),onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
+    chat=createChatController({client:chatClient(sdk),isVisible:()=>doc.visibilityState!=='hidden',onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh({background:true}),onReconnect:()=>friends.refresh({background:true}),onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
       if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
-    friends=createFriendsController({sdk,onChange:next=>{friendState=next;render();}});
+    friends=createFriendsController({sdk,onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.forgetPeer(id);}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{
       state=next;render();if(live){friends.setView(current.friends?.enabled===true,state.tab==='friends');chat.configure(current,state.clan?.id);}
     },onEvent:notify});

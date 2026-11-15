@@ -14,8 +14,8 @@ export function registerFriendsTests({test,assert,container}) {
    assert(node&&node.getBoundingClientRect().width>0&&node.getBoundingClientRect().height>0,`${selector} not visible`);
   }
   assert(select.querySelector('.sk-friend-name').textContent===name,'Wrong player name');
-  select.click();
-  assert(!row.querySelector('.sk-member-panel')&&select.disabled,'Identity opened preview friend management');
+  if(canChat)assert(!select.disabled,'Shared friend management is disabled');
+  else {select.click();assert(!row.querySelector('.sk-member-panel')&&select.disabled,'Non-friend opened friend management');}
   const chat=row.querySelector('.sk-friend-row > .sk-btn');
   assert(chat&&chat.hidden===!canChat,'Wrong Chat visibility');
  };
@@ -25,6 +25,7 @@ export function registerFriendsTests({test,assert,container}) {
    if(override){const response=override(url,opt,calls,store);if(response!==undefined)return response;}
    const path=new URL(url).pathname;
    if(path.endsWith('/players/me'))return json(player);
+   if(path.endsWith('/players/me/blocks'))return json({blocks:[]});
    if(path==='/api/v1/players')return json({players:store.players});
    if(opt.method==='GET'&&path.endsWith('/friends'))return json({friends:store.friends});
    if(opt.method==='GET'&&path.endsWith('/friends/requests'))return json({incoming:store.incoming,outgoing:store.outgoing});
@@ -38,7 +39,7 @@ export function registerFriendsTests({test,assert,container}) {
  }
  test('Friends-only widget bootstraps/list maps Social IDs, both directions and no fabricated presence',()=>fixture(async({mount,calls})=>{
   const cfg=config();cfg.texts.labels.accept='Approve';cfg.texts.labels.cancel='Undo';const {root}=mount(cfg);await waitFor(()=>root.querySelector('[data-friend-action="remove"]'));
-  assert(calls[0].url.endsWith('/players/me')&&calls.length===3,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('[data-friend-action="remove"]').dataset.friendId===friend.id,'Remove used request/external ID');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
+  assert(calls[0].url.endsWith('/players/me')&&calls.length===4,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('[data-friend-action="remove"]').dataset.friendId===friend.id,'Remove used request/external ID');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
  }));
  test('Friends search sends debounced server q, Add sends Social playerId then refreshes requests/search',()=>fixture(async({mount,calls})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="remove"]'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));
@@ -93,7 +94,7 @@ export function registerFriendsTests({test,assert,container}) {
   store.friends=[];store.incoming=[];store.outgoing=[];const {root}=mount(config());await waitFor(()=>root.querySelector('[data-sdk-retry]'));assert(root.textContent.includes('Synthetic unavailable'),'Error hidden');fail=false;root.querySelector('[data-sdk-retry]').click();await waitFor(()=>root.textContent.includes('No friends or requests yet'));type(root,'player-search','New');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));root.querySelector('[data-friend-action="send"]').click();await waitFor(()=>root.textContent.includes('Player unavailable'));assert(!root.textContent.includes('Request sent'),'Rejection became success');
  },(url,opt)=>{if(url.endsWith('/friends')&&fail)throw new TypeError('Synthetic unavailable');if(url.endsWith('/requests')&&opt.method==='POST')return json({error:{code:'player_not_found',message:'Player unavailable'}},404);});});
  test('Friends hidden/disabled config makes no requests until enabled; disabling ignores pending results',()=>{const pending=deferred();return fixture(async({mount,calls})=>{
-  const cfg=config();cfg.friends.enabled=false;const {root,handle}=mount(cfg);await sleep(20);assert(calls.length===0,'Disabled Friends requested');cfg.friends.enabled=true;handle.updateConfig(cfg);[...root.querySelectorAll('.sk-tab')].find(el=>el.textContent==='Friends').click();await waitFor(()=>calls.length===3);cfg.friends.enabled=false;handle.updateConfig(cfg);pending.resolve(json({friends:[friend]}));await sleep(20);assert(!root.querySelector('[data-friend-action]'),'Disabled feature received late data');
+  const cfg=config();cfg.friends.enabled=false;const {root,handle}=mount(cfg);await sleep(20);assert(calls.length===0,'Disabled Friends requested');cfg.friends.enabled=true;handle.updateConfig(cfg);[...root.querySelectorAll('.sk-tab')].find(el=>el.textContent==='Friends').click();await waitFor(()=>calls.length===4);cfg.friends.enabled=false;handle.updateConfig(cfg);pending.resolve(json({friends:[friend]}));await sleep(20);assert(!root.querySelector('[data-friend-action]'),'Disabled feature received late data');
  },(url)=>url.endsWith('/friends')?pending.promise:undefined);});
  test('Friends session reset clears old state/draft and rejects late responses; independent widget survives',()=>{const pending=deferred();let waiting=false,nextPlayer=false;return fixture(async({mount,sdk})=>{
   const a=mount(config()),b=mount(config());await waitFor(()=>a.root.querySelector('[data-friend-action="remove"]')&&b.root.querySelector('[data-friend-action="remove"]'));type(a.root,'player-search','old draft');waiting=true;const refresh=a.handle.refreshFriends();await sleep(10);nextPlayer=true;waiting=false;sdk.resetPlayerSession();pending.resolve(json({friends:[friend]}));await refresh;assert(a.root!==sharedRoot(a.target)&&b.root!==sharedRoot(b.target),'Session did not replace old UI roots');await waitFor(()=>sharedRoot(a.target).textContent.includes('No friends or requests yet'));assert((await sdk.getMyPlayer()).id===stranger.id,'Session retained the old player identity');assert(sharedRoot(a.target).querySelector('[data-key="player-search"]').value===''&&!sharedRoot(a.target).textContent.includes('Aysel'),'Old player draft/friends leaked');a.handle.destroy();assert(sharedRoot(b.target),'One widget destroy affected another');
@@ -104,7 +105,7 @@ export function registerFriendsTests({test,assert,container}) {
   return waiting&&url.endsWith('/friends')?pending.promise:undefined;
  });});
  test('Friends navigation/destroy cancels search timer and late load cannot recreate DOM',()=>{const pending=deferred();return fixture(async({mount,calls})=>{
-  const {root,handle,target}=mount(config());await waitFor(()=>calls.length===3);type(root,'player-search','cancel search');handle.destroy();pending.resolve(json({friends:[friend]}));await sleep(300);assert(!sharedRoot(target)&&calls.length===3,'Destroyed widget leaked requests/DOM');
+  const {root,handle,target}=mount(config());await waitFor(()=>calls.length===4);type(root,'player-search','cancel search');handle.destroy();pending.resolve(json({friends:[friend]}));await sleep(300);assert(!sharedRoot(target)&&calls.length===4,'Destroyed widget leaked requests/DOM');
  },url=>url.endsWith('/friends')?pending.promise:undefined);});
  test('session reset cannot route detached old clan controls into the next player controllers',()=>withSocial(container,(url,opt)=>{
   if(url.endsWith('/players/me/clan'))return json({error:{code:'not_in_clan',message:'None'}},404);

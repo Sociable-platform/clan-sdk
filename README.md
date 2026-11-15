@@ -350,6 +350,9 @@ await sdk.acceptFriendRequest(incoming[0].id);
 await sdk.declineFriendRequest(incoming[0].id);
 await sdk.cancelFriendRequest(outgoing[0].id);
 await sdk.removeFriend(friends[0].id);
+await sdk.blockPlayer(friends[0].id);
+const {blocks} = await sdk.listBlocks();
+await sdk.unblockPlayer(blocks[0].id); // Does not restore friendship.
 ```
 
 | Method | Confirmed request and success |
@@ -363,14 +366,34 @@ await sdk.removeFriend(friends[0].id);
 | `declineFriendRequest(requestId)` | POST `/api/v1/friends/requests/{id}/decline`, no body → 204 |
 | `cancelFriendRequest(requestId)` | DELETE `/api/v1/friends/requests/{id}`, no body → 204 |
 | `removeFriend(playerId)` | DELETE `/api/v1/friends/{id}`, no body → 204 |
+| `listBlocks()` | GET `/api/v1/players/me/blocks` → 200 `{blocks:[{id,displayName,since}]}` |
+| `blockPlayer(playerId)` | POST `/api/v1/players/{id}/block`, no body → 204, idempotent |
+| `unblockPlayer(playerId)` | DELETE `/api/v1/players/{id}/block`, no body → 204, idempotent |
 
-**ID namespaces:** send/remove use the **Social player UUID**, from search, friend lists or member lists. `externalId` is the game's own identifier and is never substituted for that UUID. Accept/decline/cancel use the **request UUID**, not `entry.player.id`. The server infers caller/game from the token. `getMyPlayer` reuses the backend's idempotent EnsurePlayer path; no extra registration endpoint/key is introduced.
+**ID namespaces:** send/remove/block/unblock use the **Social player UUID**, from search, friend lists, blocked lists or member lists. `externalId` is the game's own identifier and is never substituted for that UUID. Accept/decline/cancel use the **request UUID**, not `entry.player.id`. The server infers caller/game from the token. `getMyPlayer` reuses the backend's idempotent EnsurePlayer path; no extra registration endpoint/key is introduced.
 
-Search requires nonblank q (1–50 characters after server trimming), optional integer limit1–100, default100. The server excludes self/other games and returns relations `none`, `friend`, `request_sent`, `request_received`; pending relations include `requestId`. DTO adapters remain internal to the SDK and never fabricate online presence.
+Search requires nonblank q (1–50 characters after server trimming), optional integer limit1–100, default100. The server excludes self/other games and returns relations `none`, `friend`, `request_sent`, `request_received`, `blocked`; pending relations include `requestId`. Caller-blocked search results offer Unblock. Players who blocked the caller are hidden by Social. DTO adapters remain internal to the SDK and never fabricate online presence.
 
-The UI loads only when `friends.enabled === true` and Friends opens. It uses shared `@clan/ui` rows/search/Accept and shared button styles. SDK bindings add Add/Decline/Cancel/Remove/Refresh controls to those existing rows, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
+Initial loading requires `friends.enabled === true` and opening Friends. It uses shared `@clan/ui` rows, friend-management confirmation and Blocked section. SDK bindings add Add/Decline/Cancel/Remove/Refresh controls to those existing rows, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests, blocked players and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
 
-The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. When the live chat Realtime connection is enabled, friend notifications also request a refetch; otherwise explicit refresh remains available. Real conversation presence comes from Realtime, never preview data.
+Select a friend, choose **Block**, and confirm using the published UI's controls.
+Blocking removes friendship and pending requests in either direction. The SDK
+reloads all three collections and their counts, and clears that DM's messages,
+draft and pending send. The **Blocked** section loads actual Social players and
+its **Unblock** button removes only the caller's block. Unblock does not restore
+friendship, requests or DM membership; a new accepted friend request is required.
+Clan chat follows its existing membership rules. Pending mutations disable
+actions; realtime refreshes cannot release the duplicate-request guard.
+
+The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. When live Realtime is enabled, friend notifications, conversation membership events and reconnect also refresh enabled Friends state in the background. Social's `player.blocked`/`player.unblocked` broker events are private and are not websocket notifications; `conversation.removed` revokes the remote DM. Real conversation presence comes from Realtime, never preview data.
+
+TEAM-250 verification: **298 Node tests**, **97 browser regression tests against
+built output with mocked services**, plus a separate live built-ESM browser check
+with two disposable players against local Social/Realtime. Block/unblock,
+reload persistence, both players' friendship/DM state, rejected messages in both
+directions and explicit re-friending passed. SDK **0.1.1** still bundles published
+`@clan/ui` **0.1.30**; no dependency change was needed. See
+[TEAM-250 results](TEAM-250.md) for contracts and the opt-in live command.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.
 
