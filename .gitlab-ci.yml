@@ -12,7 +12,10 @@ test:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
       allow_failure: true
-    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+    # develop is paused to save shared runner minutes (the free quota is 400 a month): the tests run on main,
+    # before the images are built and deployed. Run them on your machine before merging. To run them on
+    # develop again, add:  || $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH == "main"
   script:
     # GITLAB_NPM_TOKEN is the existing masked read-only group deploy token.
     - npm ci --no-audit --no-fund
@@ -32,7 +35,9 @@ images:
     DOCKER_TLS_CERTDIR: "/certs"
     PLATFORMS: linux/amd64,linux/arm64
   rules:
-    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"
+    # main only: nothing is deployed from develop, so its images were built for nobody. A merge request can
+    # still build them by hand (the play button).
+    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
       allow_failure: true
