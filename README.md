@@ -492,6 +492,21 @@ Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-
 
 Host events bubble from the widget: `clan-sdk:navigate` (`screen`, `previousScreen`), `clan-sdk:tab` (`tab`), `clan-sdk:joined`/`created` (`clanId`). The SDK performs the confirmed actions itself.
 
+### Unread messages and friend requests
+
+The widget shows what is new (counts on the Friends and Chat tabs, a dot on the Clan tab, bold unread conversations, a "New messages" line) from Realtime's own read positions: `unread` of each conversation in `GET /api/v1/conversations`, one more for each `message.new` from another player while that conversation is not on screen, and `conversation.read` when it is. Read positions live on the server, so they survive reloads and other devices (other open tabs of the same player are not told until they reload the list).
+
+For the game's own open/close button, the widget sends `clan-sdk:unread` whenever the numbers change, including when they drop to 0:
+
+```js
+container.addEventListener('clan-sdk:unread', event => {
+  const { total, requests, clan, direct } = event.detail; // direct: { [friendId]: count }
+  openClansButton.dataset.badge = total > 0 ? (total > 9 ? '9+' : String(total)) : '';
+});
+```
+
+`requests` counts friend requests the player received (known once Friends has loaded, after a live `friend_request` notification or when the browser tab comes back to the front). To keep counting while the panel is closed, keep the widget mounted and hide its container (for example `hidden` or `display: none`) instead of destroying it: nothing is marked read while the container is hidden or the browser tab is in the background, and what is on screen is read as soon as the container is shown again.
+
 ## Social client API (unchanged)
 
 ```js
