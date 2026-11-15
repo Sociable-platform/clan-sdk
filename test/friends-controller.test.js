@@ -5,15 +5,15 @@ import {player,friend,sent,incoming,search} from './fixtures/social/friends.js';
 const tick=()=>new Promise(done=>setTimeout(done,10));
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 function setup(extra={}) {
- const states=[],calls=[];const sdk={getMyPlayer:async()=>{calls.push('me');return player;},listFriends:async()=>{calls.push('friends');return {friends:[friend]};},listFriendRequests:async()=>{calls.push('requests');return {incoming:[incoming],outgoing:[sent]};},searchPlayers:async args=>{calls.push(['search',args]);return search;},...Object.fromEntries(['sendFriendRequest','acceptFriendRequest','declineFriendRequest','cancelFriendRequest','removeFriend'].map(method=>[method,async id=>{calls.push([method,id]);return undefined;}])),...extra};
+ const states=[],calls=[];const sdk={getMyPlayer:async()=>{calls.push('me');return player;},listFriends:async()=>{calls.push('friends');return {friends:[friend]};},listFriendRequests:async()=>{calls.push('requests');return {incoming:[incoming],outgoing:[sent]};},listBlocks:async()=>{calls.push('blocks');return {blocks:[]};},searchPlayers:async args=>{calls.push(['search',args]);return search;},...Object.fromEntries(['sendFriendRequest','acceptFriendRequest','declineFriendRequest','cancelFriendRequest','removeFriend'].map(method=>[method,async id=>{calls.push([method,id]);return undefined;}])),...extra};
  const controller=createFriendsController({sdk,onChange:s=>states.push(s),debounceMs:1});return {controller,sdk,states,calls,state:()=>states.at(-1)};
 }
 test('Friends only fetches when enabled/visible, bootstraps real Social identity and maps collections',async()=>{
  const f=setup();f.controller.setView(false,true);await tick();assert.deepEqual(f.calls,[]);f.controller.setView(true,false);await tick();assert.deepEqual(f.calls,[]);
- f.controller.setView(true,true);await tick();assert.deepEqual(f.calls,['me','friends','requests']);assert.equal(f.state().player.id,player.id);assert.equal(f.state().incoming[0].id,incoming.id);assert.equal(f.state().outgoing[0].playerId,friend.id);f.controller.destroy();
+ f.controller.setView(true,true);await tick();assert.deepEqual(f.calls,['me','friends','requests','blocks']);assert.equal(f.state().player.id,player.id);assert.equal(f.state().incoming[0].id,incoming.id);assert.equal(f.state().outgoing[0].playerId,friend.id);f.controller.destroy();
 });
 for(const [action,id,method] of [['accept',incoming.id,'acceptFriendRequest'],['decline',incoming.id,'declineFriendRequest'],['cancel',sent.id,'cancelFriendRequest'],['remove',friend.id,'removeFriend']])test(`${action} uses correct ID and refetches both lists`,async()=>{
- const f=setup();f.controller.setView(true,true);await tick();await f.controller.action(action,id);assert.deepEqual(f.calls[3],[method,id]);assert.deepEqual(f.calls.slice(4),['me','friends','requests']);f.controller.destroy();
+ const f=setup();f.controller.setView(true,true);await tick();await f.controller.action(action,id);assert.deepEqual(f.calls[4],[method,id]);assert.deepEqual(f.calls.slice(5),['me','friends','requests','blocks']);f.controller.destroy();
 });
 test('search debounce/races and empty query; newest results win',async()=>{
  const a=deferred(),b=deferred();let calls=0;const f=setup({searchPlayers:()=>++calls===1?a.promise:b.promise});f.controller.setView(true,true);await tick();f.controller.search('old');await tick();f.controller.search('new');await tick();b.resolve({players:[{id:friend.id,displayName:'new',relation:'none'}]});await tick();a.resolve(search);await tick();assert.equal(f.state().players[0].name,'new');f.controller.search(' ');await tick();assert.equal(calls,2);assert.deepEqual(f.state().players,[]);f.controller.destroy();

@@ -15,6 +15,8 @@ const handleUi=uiPackageHandler(ui);
 const bundleMode=process.env.BROWSER_TEST_BUNDLE==='1';
 const bundleConfig=JSON.parse(await readFile(new URL('./fixtures/platform-widget-v1.json',import.meta.url),'utf8'));
 bundleConfig.config.theme.colors.background='#123456';
+bundleConfig.config.theme.fonts.heading.family='Bangers';
+bundleConfig.config.theme.fonts.body.family='Silkscreen';
 bundleConfig.config.friends.enabled=false;
 bundleConfig.config.chat.enabled=false;
 const liveChat=process.env.LIVE_CHAT_TEST==='1'?await (await import('../live/chat-fixture.js')).prepareLiveChat():null;

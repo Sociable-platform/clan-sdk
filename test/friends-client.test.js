@@ -9,6 +9,9 @@ const cases=[
  ['getMyPlayer',[], 'GET','/players/me',player,200],
  ['listFriends',[],'GET','/friends',{friends:[friend]},200],
  ['listFriendRequests',[],'GET','/friends/requests',{incoming:[incoming],outgoing:[]},200],
+ ['listBlocks',[],'GET','/players/me/blocks',{blocks:[friend]},200],
+ ['blockPlayer',[friend.id],'POST',`/players/${friend.id}/block`,undefined,204],
+ ['unblockPlayer',[friend.id],'DELETE',`/players/${friend.id}/block`,undefined,204],
  ['searchPlayers',[{q:'ay',limit:5}],'GET','/players?q=ay&limit=5',search,200],
  ['sendFriendRequest',[{playerId:friend.id}],'POST','/friends/requests',sent,201,{playerId:friend.id}],
  ['sendFriendRequest',[{playerId:friend.id}],'POST','/friends/requests',friend,200,{playerId:friend.id}],
@@ -46,7 +49,7 @@ test('Friends uses same 401 fresh-token retry retaining POST JSON',async t=>{
 });
 test('invalid Friends inputs and init do not acquire tokens/network',t=>{
  const calls=recordingFetch(t);let tokens=0;const s=init({socialUrl:'https://social.test',getPlayerToken:()=>{tokens++;return 'token';}});
- for(const method of ['acceptFriendRequest','declineFriendRequest','cancelFriendRequest','removeFriend'])for(const id of [null,undefined,'','.','..',3])assert.throws(()=>s[method](id),TypeError);
+ for(const method of ['acceptFriendRequest','declineFriendRequest','cancelFriendRequest','removeFriend','blockPlayer','unblockPlayer'])for(const id of [null,undefined,'','.','..',3])assert.throws(()=>s[method](id),TypeError);
  assert.throws(()=>s.sendFriendRequest({playerId:''}),TypeError);assert.throws(()=>s.searchPlayers({}),TypeError);assert.throws(()=>s.searchPlayers({q:'a',limit:0}),TypeError);assert.equal(calls.length,0);assert.equal(tokens,0);
 });
 test('Friends callback/network failures never retry or fetch unauthenticated',async t=>{

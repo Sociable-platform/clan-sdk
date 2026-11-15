@@ -43,12 +43,18 @@ export function init(options) {
       const query = q === undefined ? '' : `?${new URLSearchParams({ q })}`;
       return request(`/api/v1/clans${query}`);
     },
-    createClan({ name } = {}) {
+    createClan({ name, badge, description, tag } = {}) {
       if (typeof name !== 'string') {
         throw new TypeError('name must be a string.');
       }
       // Name length/uniqueness remain server rules; do not add UI validation here.
-      return request('/api/v1/clans', { method: 'POST', body: { name } });
+      const body={name};
+      for(const [field,value]of Object.entries({badge,description,tag})){
+        if(value===undefined)continue;
+        if(typeof value!=='string')throw new TypeError(`${field} must be a string.`);
+        body[field]=value;
+      }
+      return request('/api/v1/clans', { method: 'POST', body });
     },
     joinClan(clanId) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/join`, { method: 'POST' });
@@ -60,13 +66,22 @@ export function init(options) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/members`);
     },
   };
-  internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request),leaveClan:id=>request(`/api/v1/clans/${encodeClanId(id)}/leave`,{method:'POST'})});
+  // Member moderation (TEAM-257): bodyless; the server decides by clan role.
+  const member=(clanId,playerId,action='')=>`/api/v1/clans/${encodeClanId(clanId)}/members/${encodeId(playerId,'playerId')}${action}`;
+  internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request),leaveClan:id=>request(`/api/v1/clans/${encodeClanId(id)}/leave`,{method:'POST'}),
+    kickClanMember:(clanId,playerId)=>request(member(clanId,playerId),{method:'DELETE'}),
+    promoteClanMember:(clanId,playerId)=>request(member(clanId,playerId,'/promote'),{method:'POST'}),
+    demoteClanMember:(clanId,playerId)=>request(member(clanId,playerId,'/demote'),{method:'POST'})});
   return client;
 }
 
 function encodeClanId(clanId) {
-  if (typeof clanId !== 'string' || !clanId.trim() || clanId === '.' || clanId === '..') {
-    throw new TypeError('clanId must be a non-empty string, excluding dot path segments.');
+  return encodeId(clanId,'clanId');
+}
+
+function encodeId(value,field) {
+  if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..') {
+    throw new TypeError(`${field} must be a non-empty string, excluding dot path segments.`);
   }
-  return encodeURIComponent(clanId);
+  return encodeURIComponent(value);
 }

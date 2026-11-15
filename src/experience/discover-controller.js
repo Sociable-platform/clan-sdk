@@ -20,6 +20,10 @@ export function clanViewModels(value) {
       if (typeof item.emblemText !== 'string') throw new TypeError('Invalid emblemText.');
       result.emblemText = item.emblemText;
     }
+    for(const key of ['badge','description','tag'])if(item[key]!==undefined){
+      if(typeof item[key]!=='string')throw new TypeError(`Invalid clan view model ${key}.`);
+      result[key]=item[key];
+    }
     if (item.canJoin !== undefined) {
       if (typeof item.canJoin !== 'boolean') throw new TypeError('Invalid canJoin.');
       result.canJoin = item.canJoin;

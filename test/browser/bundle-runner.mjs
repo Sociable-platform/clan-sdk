@@ -6,6 +6,7 @@ import {chromium} from 'playwright';
 import * as publicApi from '../../src/index.js';
 
 const root=new URL('../../',import.meta.url);
+const liveFonts=process.env.BUNDLE_LIVE_FONTS==='1';
 const {version}=JSON.parse(await readFile(new URL('package.json',root),'utf8'));
 const expectedExports=[...Object.keys(publicApi),'version'].sort();
 for(const name of ['clan-sdk.js','clan-sdk.esm.js']) {
@@ -49,6 +50,10 @@ try {
       await context.route('**/*',route=>{
         const url=new URL(route.request().url());
         if(url.origin===origin&&(allowed.has(url.pathname)||url.pathname.startsWith('/__bundle__/')))return route.continue();
+        // Font network delivery is checked separately against Google. Keep the
+        // bundle/service regression deterministic while asserting its font URL.
+        if(url.origin==='https://fonts.googleapis.com'&&url.pathname==='/css2')return liveFonts?route.continue():route.fulfill({contentType:'text/css',body:''});
+        if(liveFonts&&url.origin==='https://fonts.gstatic.com'&&route.request().resourceType()==='font')return route.continue();
         blocked.push(url.href);return route.abort();
       });
       page.on('request',request=>requests.push(new URL(request.url()).pathname));
@@ -58,6 +63,15 @@ try {
       await page.waitForSelector('#summary[data-result]',{timeout:15000});
       assert.equal(await page.locator('#summary').getAttribute('data-result'),'passed',await page.locator('#summary').textContent());
       const result=await page.evaluate(()=>window.bundleResult);
+      if(liveFonts){
+        await page.waitForFunction(()=>Boolean(document.querySelector('link[data-clan-sdk-fonts]')?.sheet),{},{timeout:15000});
+        const loaded=await page.evaluate(async()=>{
+          await Promise.all([document.fonts.load('600 15px Bangers'),document.fonts.load('400 13px Silkscreen')]);
+          return ['Bangers','Silkscreen'].every(family=>[...document.fonts].some(face=>face.family.replace(/['"]/g,'')===family&&face.status==='loaded'));
+        });
+        assert.equal(loaded,true,'Configured webfont files did not load');
+        assert.ok(requests.some(path=>path.startsWith('/s/bangers/'))&&requests.some(path=>path.startsWith('/s/silkscreen/')),'Actual font files were not downloaded');
+      }
       assert.equal(result.version,version);
       assert.deepEqual(result.exports,expectedExports);
       assert.deepEqual(blocked,[],'Unexpected external/source/style dependency');
@@ -67,7 +81,7 @@ try {
         assert.ok(requests.includes(`/__bundle__${suffix}`),`Missing service request: ${suffix}`);
       }
       await page.screenshot({path:fileURLToPath(new URL(`test/browser/artifacts/bundle-${format}.png`,root))});
-      console.log(`PASS ${filename}: classic/global or direct named import, version/API parity, styled visible panel (${result.width}x${result.height}), token and service URLs; no external/source/CSS dependencies`);
+      console.log(`PASS ${filename}: classic/global or direct named import, version/API parity, styled visible panel (${result.width}x${result.height}), published fonts, token and service URLs; UI code/styles bundled (${liveFonts?'real Bangers/Silkscreen files loaded':'font CSS mocked'})`);
     } finally {await context.close();}
   }
   const page=await browser.newPage();

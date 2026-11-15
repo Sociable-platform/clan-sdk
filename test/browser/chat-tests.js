@@ -29,8 +29,20 @@ export function registerChatTests({test,assert,container}) {
  }
  test('live Chat waits for hello, loads actual conversation/history and incoming frames repaint immediately',()=>fixture(async({mount,sockets,calls})=>{
   const a=mount();await waitFor(()=>sockets.length);assert(a.root.textContent.includes('Connecting'),'Socket open treated as authentication');sockets[0].hello();await waitFor(()=>a.root.textContent.includes('No messages yet'));
-  assert(!a.root.querySelector('[data-chat-action]'),'SDK injected extra chat buttons');assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');assert(a.root.querySelector('.sk-header .sk-status').textContent==='Ali','Authenticated header missing');
-  sockets[0].frame('message.new',{conversationId:room.id,message:message('live','Immediate live message')});await waitFor(()=>a.root.textContent.includes('Immediate live message'));assert(a.root.querySelectorAll('.sk-msg').length===1,'Incoming message duplicated');
+  assert(!a.root.querySelector('[data-chat-action]'),'SDK injected extra chat buttons');assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');
+  sockets[0].frame('message.new',{conversationId:room.id,message:message('live','Immediate live message')});await waitFor(()=>a.root.textContent.includes('Immediate live message'));assert(a.root.querySelectorAll('.sk-msg').length===1,'Incoming message duplicated');sockets[0].frame('message.new',{conversationId:room.id,message:message('mine','Authenticated own message',me)});await waitFor(()=>a.root.querySelector('[data-mine="true"] .sk-bubble')?.textContent==='Authenticated own message');assert(a.root.querySelectorAll('.sk-msg').length===2,'Authenticated player ID did not classify own messages');
+ }));
+ test('a full chat stays pinned to the newest message after load, own send and SDK status changes; a reader who scrolled up stays put',()=>fixture(async({mount,ready,sockets,messages})=>{
+  for(let i=0;i<30;i++)messages.push(message('fill'+i,'Earlier message '+i+' with enough text to wrap inside its bubble',i%2?me:peer));
+  const a=mount();await ready(a);await waitFor(()=>a.root.querySelectorAll('.sk-msg').length===30);await sleep(50);
+  const chat=()=>a.root.querySelector('[data-key="chat"]'),gap=()=>{const c=chat();return c.scrollHeight-c.scrollTop-c.clientHeight;};
+  assert(chat().scrollHeight>chat().clientHeight,'Fixture does not overflow the message list');assert(gap()<1,`Loaded list stops ${gap()}px short of the newest message`);
+  type(a.root,'message','A long own message that wraps over several lines in its bubble so a clipped bottom edge is easy to see');a.root.querySelector('.sk-composer button').click();
+  const ws=sockets[0],sent=ws.sent.filter(f=>f.type==='message.send').at(-1),own=message('own-new',sent.data.body,me);
+  ws.frame('message.ack',{replyTo:sent.id,messageId:own.id,createdAt:own.createdAt});ws.frame('message.new',{conversationId:room.id,message:own});
+  await waitFor(()=>a.root.querySelector('[data-key="message"]').value==='');await sleep(50);assert(gap()<1,`Own message is clipped by ${gap()}px`);
+  chat().scrollTop=0;await sleep(20);ws.frame('message.new',{conversationId:room.id,message:message('reply','A reply while reading history')});
+  await waitFor(()=>a.root.textContent.includes('A reply while reading history'));await sleep(50);assert(chat().scrollTop<5,'Reader who scrolled up was pulled to the end');
  }));
  test('live Chat retains draft during pending/error, prevents duplicates and only clears on ACK',()=>fixture(async({mount,ready,sockets,messages})=>{
   const a=mount();await ready(a);const input=type(a.root,'message','Draft to send');input.focus();a.root.querySelector('.sk-composer button').click();a.root.querySelector('.sk-composer button').click();
@@ -39,6 +51,22 @@ export function registerChatTests({test,assert,container}) {
   a.root.querySelector('.sk-composer button').click();const second=ws.sent.filter(f=>f.type==='message.send').at(-1),stored=message('stored','Final server body',me);messages.push(stored);ws.frame('message.ack',{replyTo:second.id,messageId:stored.id,createdAt:stored.createdAt});ws.frame('message.new',{conversationId:room.id,message:stored});
   await waitFor(()=>a.root.querySelector('[data-key="message"]').value==='');assert(a.root.querySelectorAll('.sk-msg').length===1&&a.root.textContent.includes('Final server body'),'ACK/broadcast/history duplicated or fabricated body');
  }));
+ test('long DM histories keep friend chips and the composer visible while messages scroll independently',()=>{
+  const other={...room,id:'room-other',members:[room.members[0],{id:'peer-other',name:'Leyla',online:false}]};
+  return fixture(async({mount,ready,messages,calls})=>{
+   messages.push(...Array.from({length:100},(_,i)=>message(`history-${String(i).padStart(3,'0')}`,`History message ${i}`)));
+   const a=mount();await ready(a);await waitFor(()=>a.root.querySelectorAll('.sk-msg').length===100);
+   const chips=a.root.querySelector('.sk-chips'),chat=a.root.querySelector('.sk-chat'),panel=a.root.querySelector('.sk-panel'),composer=a.root.querySelector('.sk-composer');
+   const row=chips.getBoundingClientRect(),box=panel.getBoundingClientRect(),input=composer.getBoundingClientRect();
+   assert(row.height>=30,'Friend selector collapsed under long history');
+   assert(row.top>=box.top&&row.bottom<=box.bottom,'Friend selector clipped outside panel');
+   assert(chat.scrollHeight>chat.clientHeight,'Message history does not scroll independently');
+   assert(input.top>=box.top&&input.bottom<=box.bottom,'Composer clipped outside panel');
+   const names=[...chips.querySelectorAll('.sk-chip')];assert(names.map(node=>node.textContent).join(',')==='Rashad,Leyla','DM peers missing');
+   names[1].click();await waitFor(()=>a.root.textContent.includes('Other DM history'));
+   assert(calls.some(call=>call.url.includes('/room-other/messages')),'Friend selection requested the wrong conversation');
+  },url=>url.endsWith('/conversations')?json({conversations:[room,other]}):url.includes('/room-other/messages')?json({messages:[{...message('other','Other DM history'),senderId:'peer-other',senderName:'Leyla'}],hasMore:false}):undefined);
+ });
  test('live Chat theme update retains draft/focus and invalid update leaves UI unchanged',()=>fixture(async({mount,ready})=>{
   const a=mount();await ready(a);type(a.root,'message','Keep draft').focus();const next=config();next.theme.colors.brand='#123456';a.handle.updateConfig(next);
   const input=a.root.querySelector('[data-key="message"]');assert(input.value==='Keep draft'&&a.root.activeElement===input,'Theme update lost draft/focus');const before=a.root.innerHTML;

@@ -40,7 +40,7 @@ npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
-new release just because `^0.1.0` allows one. To adopt a newer compatible release:
+new release just because `^0.1.30` allows one. To adopt a newer compatible release:
 
 ```sh
 npm update @clan/ui
@@ -50,7 +50,7 @@ npm run test:browser
 
 Include the resulting changed `package-lock.json` with every dependency update.
 Do not substitute `file:` links or copied repositories. The lockfile currently
-resolves registry release **0.1.1**, which is bundled into both browser formats.
+resolves registry release **0.1.30**, which is bundled into both browser formats.
 See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
 `npm run build` is the canonical build command. It uses esbuild and produces
@@ -61,19 +61,28 @@ version banner read from `package.json`; the same version is exposed as
 available. Each output must be **under 60,000 bytes gzip**; the build prints both
 sizes and fails if either reaches that limit. No bundler, import map, React,
 separate UI stylesheet, or source checkout is needed by the consuming game.
-Standalone builds use the renderer's system font fallbacks and never fetch
-Google Fonts CSS. A game can supply fonts itself if it wants the curated faces.
+All formats load the configured curated heading/body fonts automatically from
+Google Fonts, matching the dashboard preview. UI styles stay inside the bundle;
+the font stylesheet and font files are fetched at runtime. If your game uses
+CSP, allow `https://fonts.googleapis.com` in `style-src` and
+`https://fonts.gstatic.com` in `font-src`. System fonts remain the fallback when
+font delivery is unavailable.
 
 `npm run test:bundle` requires a completed build. It launches headless Chromium
 (or installed Chrome/Edge), starts the plain Node HTTP server on a temporary
 port, and checks both built files on isolated HTML pages without import maps.
 It checks API/version parity, a visible styled panel, token/service URL handling,
-and rejects any extra SDK code or stylesheet requests. It then runs the existing
+and rejects extra SDK code or UI stylesheet requests. Google font CSS is mocked
+while its configured families and link lifecycle are checked. It then runs the existing
 browser regression suite against the built ESM output. These are **bundle-loading
 and regression tests with mocked Platform/Social/Realtime services**, not live
 backend verification. Screenshots are written to `test/browser/artifacts/`.
 If no browser is installed, run `npx playwright install chromium`; optionally set
 `BROWSER_CHANNEL=chrome` or `msedge` to select an installed browser.
+For an opt-in real Google Fonts delivery check, set `BUNDLE_LIVE_FONTS=1` when
+running `npm run test:bundle` (PowerShell: `$env:BUNDLE_LIVE_FONTS='1'`). This
+loads Bangers/Silkscreen font files in both formats and verifies loaded font
+faces. Platform/Social/Realtime responses remain mocked in this mode.
 
 `npm run test:browser` still serves the original source-mode tests at
 http://127.0.0.1:5174/. It starts a server without launching a browser; open the
@@ -110,6 +119,16 @@ docker build --progress=plain --secret id=gitlab_npm_token,env=GITLAB_NPM_TOKEN 
 docker run --rm -d --name clan-sdk-ticket2-check -p 127.0.0.1:18080:8080 clan-sdk:ticket2
 ```
 
+Or use Compose, which builds the `clan-sdk` image and serves it on
+`127.0.0.1:18080`. Compose reads `GITLAB_NPM_TOKEN` from your shell or ignored
+root `.env` and passes it only as a build secret:
+
+```sh
+docker compose build --no-cache sdk
+docker compose up -d --no-deps --force-recreate sdk
+node scripts/check-image.mjs http://127.0.0.1:18080
+```
+
 The credential is a [BuildKit secret](https://docs.docker.com/build/building/secrets/),
 never a build argument or Dockerfile `ENV`. It is available only during `npm ci`.
 The committed `.npmrc` keeps its literal `${GITLAB_NPM_TOKEN}` placeholder. The
@@ -135,7 +154,7 @@ These checks use the actual nginx image; they do not contact Clan backends.
 
 | Paths (current release) | Successful response headers |
 | --- | --- |
-| `/0.1.0/clan-sdk.js`, `/0.1.0/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/0.1.1/clan-sdk.js`, `/0.1.1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
 | `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
 
 The exact version is read from `package.json` at build time. `/v1/` is the agreed
@@ -360,14 +379,14 @@ Direct mount is synchronous and has no `ready` or `refreshConfig`; Platform moun
 
 Destroy is idempotent, removes only SDK-owned DOM/listeners/font references, cancels config work, invalidates pending Social completions/timers, and allows remount. The Social methods do not expose AbortSignal, so pending Social HTTP may finish, but its late result cannot update destroyed UI. Container reservation is shared across legacy/current mounts. The shared widget owns its Shadow DOM and constant stylesheet. A thin SDK stage preserves host-page content and protects the mount from ordinary host CSS; transformed ancestors still obey normal fixed-position rules.
 
-Source/package integrations load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Standalone bundles omit those external links and use the renderer's system font fallbacks. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
+All formats load curated Google font families with the same `googleFontsHref` as dashboard preview, using reference-counted links cleaned up on update/destroy. Config updates load the newly selected families; multiple widgets share a stylesheet until its last user is destroyed or switches fonts. System fallbacks remain available. Custom asset IDs can be mapped with `mountExperience({container, config, assets:{badges:{...},textures:{...}}})`; missing live clan badges are not inferred from those appearance choices. Platform mounts also accept `assets`.
 
 ## Supported shared UI and runtime data
 
 | Config | Shared presentation behavior |
 | --- | --- |
 | `theme.colors` | Brand, panel background, surface, text and muted colors |
-| `theme.fonts` | Curated heading/body families with system fallbacks; source integrations also load Google Fonts |
+| `theme.fonts` | Curated heading/body families loaded automatically in all formats, with system fallbacks |
 | `theme.frame/buttons/panel` | Frame, corners, button styles/case, opacity and blur |
 | `theme.textures/components` | Shared built-in textures, safe mapped custom assets and per-part overrides |
 | `layout.position`, `startCollapsed` | **bottom-left/bottom-right** dock and launcher state. Current schema has no numeric width/height or top corners; the shared component owns responsive sizing |
@@ -385,9 +404,17 @@ Live runtime flow:
 1. If clan is enabled, call `myClan()`. Only `404 not_in_clan` means no membership; other errors are visible with Retry.
 2. No clan → Discover → `listClans({q})`. Search is debounced 250 ms; stale results cannot replace newer searches. Server errors, loading, empty and retry are shown. Capacity comes from each response's `memberCount/maxMembers`, never from config. No runtime emblem, tag or description is fabricated.
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
-4. Create uses the supplied shared form and **only `{name}`** with `createClan`. Badge/tag/description controls are disabled in live mode because the backend doesn't accept them. Duplicate writes are guarded. Server errors remain visible; success refreshes membership.
-5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
-6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave is integrated as described below; kick/promote/demote remain disabled. Config cannot grant backend permissions.
+4. Create uses the supplied shared form and `createClan({name, badge?, description?, tag?})`. The badge picker offers the published allowed IDs and sends the selected ID, not its image. Description and the optional configured tag are saved through the same Social contract. No allowed badges means the nullable UI selection is omitted from the request. Duplicate writes are guarded; pending requests disable badge/details controls. Server errors retain the form for retry; success refreshes membership. Saved badges/details are mapped from backend responses and remain visible after reload and in Discover. Missing badge fields do not invent a saved selection.
+
+For an opt-in local-service badge/reload check, build first, set
+`LIVE_BADGE_DEV_KEY` to an external development signing-key path and
+`LIVE_BADGE_GAME_ID` to a configured development game with at least two badges,
+then run `node test/live/badge.mjs`. It uses the real published configuration,
+creates one disposable player/clan, checks a non-default saved badge after
+reload, and leaves/disbands only that test clan. Google Fonts delivery is mocked;
+Platform/Social are real. No key/token is logged or shipped in the SDK.
+5. Members → `clanMembers(id)` plus a fresh `myClan` read; map `playerId/displayName/role` to shared rows. The viewer is matched only by the confirmed Social UUID from `getMyPlayer` (Friends enabled) or the Realtime hello, never guessed. Header role comes from `myClan`.
+6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave and member promote/demote/kick are integrated as described below. Config cannot grant backend permissions.
 
 The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
 
@@ -407,6 +434,9 @@ await sdk.acceptFriendRequest(incoming[0].id);
 await sdk.declineFriendRequest(incoming[0].id);
 await sdk.cancelFriendRequest(outgoing[0].id);
 await sdk.removeFriend(friends[0].id);
+await sdk.blockPlayer(friends[0].id);
+const {blocks} = await sdk.listBlocks();
+await sdk.unblockPlayer(blocks[0].id); // Does not restore friendship.
 ```
 
 | Method | Confirmed request and success |
@@ -420,14 +450,34 @@ await sdk.removeFriend(friends[0].id);
 | `declineFriendRequest(requestId)` | POST `/api/v1/friends/requests/{id}/decline`, no body → 204 |
 | `cancelFriendRequest(requestId)` | DELETE `/api/v1/friends/requests/{id}`, no body → 204 |
 | `removeFriend(playerId)` | DELETE `/api/v1/friends/{id}`, no body → 204 |
+| `listBlocks()` | GET `/api/v1/players/me/blocks` → 200 `{blocks:[{id,displayName,since}]}` |
+| `blockPlayer(playerId)` | POST `/api/v1/players/{id}/block`, no body → 204, idempotent |
+| `unblockPlayer(playerId)` | DELETE `/api/v1/players/{id}/block`, no body → 204, idempotent |
 
-**ID namespaces:** send/remove use the **Social player UUID**, from search, friend lists or member lists. `externalId` is the game's own identifier and is never substituted for that UUID. Accept/decline/cancel use the **request UUID**, not `entry.player.id`. The server infers caller/game from the token. `getMyPlayer` reuses the backend's idempotent EnsurePlayer path; no extra registration endpoint/key is introduced.
+**ID namespaces:** send/remove/block/unblock use the **Social player UUID**, from search, friend lists, blocked lists or member lists. `externalId` is the game's own identifier and is never substituted for that UUID. Accept/decline/cancel use the **request UUID**, not `entry.player.id`. The server infers caller/game from the token. `getMyPlayer` reuses the backend's idempotent EnsurePlayer path; no extra registration endpoint/key is introduced.
 
-Search requires nonblank q (1–50 characters after server trimming), optional integer limit1–100, default100. The server excludes self/other games and returns relations `none`, `friend`, `request_sent`, `request_received`; pending relations include `requestId`. DTO adapters remain internal to the SDK and never fabricate online presence.
+Search requires nonblank q (1–50 characters after server trimming), optional integer limit1–100, default100. The server excludes self/other games and returns relations `none`, `friend`, `request_sent`, `request_received`, `blocked`; pending relations include `requestId`. Caller-blocked search results offer Unblock. Players who blocked the caller are hidden by Social. DTO adapters remain internal to the SDK and never fabricate online presence.
 
-The UI loads only when `friends.enabled === true` and Friends opens. It uses shared `@clan/ui` rows/search/Accept and shared button styles. SDK bindings add Add/Decline/Cancel/Remove/Refresh controls to those existing rows, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
+Initial loading requires `friends.enabled === true` and opening Friends. It uses shared `@clan/ui` rows, friend-management confirmation and Blocked section. SDK bindings add Add/Decline/Cancel controls to those existing rows; Remove friend and Block are available only through the shared name/avatar action menu, with no standalone Remove or Refresh friends button, without copying a screen or changing dashboard props. Search is debounced250ms; stale searches/loads and results after navigation or destroy are ignored. Blank input restores the friend list without sending an invalid empty search. Both request directions are displayed. Loading, empty, failure/Retry, pending and duplicate-click guards are explicit. Successful mutations refresh friends, requests, blocked players and an active search; there is no optimistic fake friendship. 404/409 conflicts refetch while keeping the server's action error visible, without retrying the mutation. Other errors retain status/code/message through ApiError, including self, duplicate, already-friends, unavailable player and sender/receiver permission errors.
 
-The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab also refreshes. There is no polling. When the live chat Realtime connection is enabled, friend notifications also request a refetch; otherwise explicit refresh remains available. Real conversation presence comes from Realtime, never preview data.
+Select a friend, choose **Block**, and confirm using the published UI's controls.
+Blocking removes friendship and pending requests in either direction. The SDK
+reloads all three collections and their counts, and clears that DM's messages,
+draft and pending send. The **Blocked** section loads actual Social players and
+its **Unblock** button removes only the caller's block. Unblock does not restore
+friendship, requests or DM membership; a new accepted friend request is required.
+Clan chat follows its existing membership rules. Pending mutations disable
+actions; realtime refreshes cannot release the duplicate-request guard.
+
+The widget also exposes `await widget.refreshFriends()` (after `ready` for a Platform handle). It refreshes an enabled, open Friends view; otherwise it does no work. Reopening the tab and returning to the visible game also refresh enabled Friends state automatically. The public refresh method remains for host integrations and error Retry; the UI has no manual Refresh friends button. There is no polling. When live Realtime is enabled, friend notifications, conversation membership events and reconnect also refresh enabled Friends state in the background. Social's `player.blocked`/`player.unblocked` broker events are private and are not websocket notifications; `conversation.removed` revokes the remote DM. Real conversation presence comes from Realtime, never preview data.
+
+TEAM-250 verification: **298 Node tests**, **97 browser regression tests against
+built output with mocked services**, plus a separate live built-ESM browser check
+with two disposable players against local Social/Realtime. Block/unblock,
+reload persistence, both players' friendship/DM state, rejected messages in both
+directions and explicit re-friending passed. SDK **0.1.1** still bundles published
+`@clan/ui` **0.1.30**; no dependency change was needed. See
+[TEAM-250 results](TEAM-250.md) for contracts and the opt-in live command.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.
 
@@ -587,6 +637,47 @@ widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
 the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
 
 Verification and changed files: [TEAM-214 report](TEAM-214.md).
+
+## Clan member management (TEAM-257)
+
+```js
+await sdk.promoteClanMember(clanId, playerId); // 200 {playerId, displayName, role}
+await sdk.demoteClanMember(clanId, playerId);  // 200 {playerId, displayName, role}
+await sdk.kickClanMember(clanId, playerId);    // 204 → undefined
+```
+
+Bodyless `POST /api/v1/clans/{clanId}/members/{playerId}/promote|demote` and
+`DELETE /api/v1/clans/{clanId}/members/{playerId}`, Bearer player auth with the
+existing one-401 fresh-token retry. Both IDs are encoded; empty/dot IDs throw
+before any request. Errors retain status/code/message: 400 `cannot_kick_self`,
+403 `not_allowed`, 404 `clan_not_found`/`member_not_found`, 409
+`already_lowest_role`. No automatic retry.
+
+Social decides by the game's `clan.roles` (`canPromote`, `canKick`; the owner has
+every power). Promote/demote move one step; nobody is promoted to their own role
+or to owner. Without published roles only Kick exists (owner only) and promote
+answers 403. The shared Members panel offers only what the viewer's role allows,
+and the SDK maps its `setRole(target)` to the one Social step (a target that is
+not exactly one step away is ignored).
+
+The mounted panel shows Promoting/Demoting/Removing member…, allows one member
+action at a time, changes the roster only after a confirmed response, then
+re-reads members and `myClan`. Server rejections show their text and re-read
+state; network failures keep the last confirmed roster. Late responses after
+leave/kick/session reset/destroy are ignored. Events: `clan-sdk:member-role-changed`
+`{clanId,playerId,role}` and `clan-sdk:member-kicked` `{clanId,playerId}`.
+
+The kicked player receives Realtime `clan_kicked` and `conversation.removed`; an
+open widget returns to Discover and drops the clan room. Remaining members get no
+frame for role changes or kicks, so opening Members re-reads the roster and own
+role; no polling is added.
+
+The member panel's Add friend / Cancel use the Friends API (`sendFriendRequest`,
+`cancelFriendRequest`). Opening Members loads Friends state (when Friends is
+enabled) so each member shows its real relation; a member who already sent a
+request is accepted by sending one back, per Social.
+
+Verification and changed files: [TEAM-257 report](TEAM-257.md).
 
 ## Realtime clan chat (TEAM-226)
 

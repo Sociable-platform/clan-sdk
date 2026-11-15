@@ -1,5 +1,5 @@
 import {createDiscoverController} from './discover-controller.js';
-import {socialClanAdapter} from '../social/clan-adapter.js';
+import {socialClanAdapter,memberRoleAdapter} from '../social/clan-adapter.js';
 
 // Runtime state and confirmed HTTP actions only; @clan/ui owns the visual tree.
 export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen}) {
@@ -9,7 +9,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
   let membershipGeneration = 0;
   let state = {screen:'discover', tab:'clan', clan:null, role:null, members:[],
     status:'idle', clans:[], query:'', error:'', joinError:'', pendingJoin:null,
-    joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false,leavePending:false,leaveError:''};
+    joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false,leavePending:false,leaveError:'',memberPending:null,memberError:''};
   const emit = () => { if (!dead) onChange({...state}); };
   const fail = error => {
     state = {...state, error:error?.message || 'Social request failed.', profilePending:false};
@@ -54,16 +54,29 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       } else fail(error);
     }
   }
-  async function members() {
-    if(state.leavePending)return;
-    const generation=membershipGeneration;
+  // withRole also re-reads myClan: no realtime frame tells remaining members
+  // about role changes or kicks, so opening Members must not show stale power.
+  async function members({withRole=false}={}) {
+    if(state.leavePending||!state.clan)return;
+    const generation=membershipGeneration,clanId=state.clan.id;
     const ticket = ++revision;
     state = {...state, error:''}; emit();
+    const own=withRole?Promise.resolve().then(()=>sdk.myClan()).then(value=>({value}),error=>({error})):null;
     try {
-      const value = await sdk.clanMembers(state.clan.id);
-      if (!dead && enabled && ticket === revision && generation===membershipGeneration) {
-        state = {...state, members:value.members.map(m => ({id:m.playerId, name:m.displayName, role:m.role})), error:''}; emit();
+      const value = await sdk.clanMembers(clanId);
+      const mine = await own;
+      if (dead || !enabled || ticket !== revision || generation!==membershipGeneration) return;
+      let next = {...state, members:value.members.map(m => ({id:m.playerId, name:m.displayName, role:m.role})), error:''};
+      let moved = mine?.error?.status===404&&mine.error.code==='not_in_clan';
+      if (mine?.value) {
+        try {
+          const [clan] = socialClanAdapter({clans:[mine.value.clan]});
+          if (clan.id!==clanId) moved = true;
+          else if (typeof mine.value.role==='string'&&mine.value.role.trim()) next = {...next, clan, role:mine.value.role};
+        } catch {} // Roster is still authoritative; a malformed myClan keeps the last role.
       }
+      state = next; emit();
+      if (moved) void membership(state.screen,{preserveView:true});
     } catch (error) { if (!dead && ticket === revision && generation===membershipGeneration) fail(error); }
   }
   return {
@@ -71,7 +84,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     invalidateClan(id) {
       if(dead||state.clan?.id!==id)return;
       revision++;membershipGeneration++;visit++;
-      state={...state,clan:null,role:null,members:[],profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',error:'',screen:resolveScreen('discover',false)};
+      state={...state,clan:null,role:null,members:[],profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',memberPending:null,memberError:'',error:'',screen:resolveScreen('discover',false)};
       emit();list.reset();list.navigate(state.tab==='clan'&&state.screen==='discover'?'discover':'create');list.setEnabled(enabled);
     },
     async leave() {
@@ -83,16 +96,46 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
         if(dead||generation!==membershipGeneration)return;
         revision++;visit++;
         const previousScreen=state.screen,screen=resolveScreen('discover',false);
-        state={...state,clan:null,role:null,members:[],clans:[],query:'',joinedClanId:null,pendingJoin:null,createPending:false,profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',error:'',joinError:'',status:'idle',screen,tab:currentVisit===visit-1?'clan':state.tab};
+        state={...state,clan:null,role:null,members:[],clans:[],query:'',joinedClanId:null,pendingJoin:null,createPending:false,profilePending:false,membershipKnown:true,leavePending:false,leaveError:'',memberPending:null,memberError:'',error:'',joinError:'',status:'idle',screen,tab:currentVisit===visit-1?'clan':state.tab};
         emit();list.reset();list.navigate(state.tab==='clan'&&screen==='discover'?'discover':'create');list.setEnabled(true);
         onEvent('left',{clanId});onEvent('navigate',{screen,previousScreen});
       } catch(error) {if(!dead&&generation===membershipGeneration){state={...state,leavePending:false,leaveError:error?.message||'Unable to leave clan.'};emit();}}
+    },
+    // Promote/demote/kick (TEAM-257). One action at a time; only a confirmed
+    // response changes the roster, then members and own role are re-read.
+    async manageMember(action,memberId) {
+      const methods={kick:'kickClanMember',promote:'promoteClanMember',demote:'demoteClanMember'};
+      if(dead||!enabled||!methods[action]||!state.clan||!state.membershipKnown||state.profilePending||state.leavePending||state.memberPending)return;
+      if(!state.members.some(member=>member.id===memberId))return;
+      const clanId=state.clan.id,generation=membershipGeneration;
+      const current=()=>!dead&&enabled&&generation===membershipGeneration&&state.clan?.id===clanId;
+      state={...state,memberPending:{action,id:memberId},memberError:''};emit();
+      let confirmed=false;
+      try {
+        const result=await sdk[methods[action]](clanId,memberId);
+        confirmed=true;
+        if(!current())return;
+        if(action==='kick'){
+          state={...state,memberPending:null,members:state.members.filter(member=>member.id!==memberId),clan:{...state.clan,memberCount:Math.max(0,state.clan.memberCount-1)}};
+          emit();onEvent('member-kicked',{clanId,playerId:memberId});
+        }else{
+          const changed=memberRoleAdapter(result);
+          state={...state,memberPending:null,members:state.members.map(member=>member.id===changed.id?{...member,role:changed.role}:member)};
+          emit();onEvent('member-role-changed',{clanId,playerId:changed.id,role:changed.role});
+        }
+      } catch(error) {
+        if(!current())return;
+        state={...state,memberPending:null,memberError:error?.message||'Unable to update clan member.'};emit();
+        // Network failures keep the last confirmed roster; server answers mean it moved on.
+        if(!confirmed&&!(error?.status>=400&&error.status<500))return;
+      }
+      await members({withRole:true});
     },
     start() { if (enabled) return membership(); },
     search:q => list.search(q),
     join(id) { if (!state.profilePending && state.membershipKnown && !state.clan && !state.createPending) void list.join(id); },
     retry() {
-      if(state.screen === 'members' && state.clan)return members();
+      if(state.screen === 'members' && state.clan)return members({withRole:true});
       return state.membershipKnown && state.screen === 'discover' ? list.retry() : membership(state.clan ? 'home' : undefined);
     },
     navigate(screen) {
@@ -101,10 +144,10 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       visit++;
       if (!state.profilePending) revision++;
       const previousScreen = state.screen;
-      state = {...state, screen, tab:'clan', error:''};
+      state = {...state, screen, tab:'clan', error:'', memberError:''};
       list.navigate(screen === 'discover' ? 'discover' : 'create'); emit();
       onEvent('navigate',{screen,previousScreen});
-      if (screen === 'members' && state.clan) void members();
+      if (screen === 'members' && state.clan) void members({withRole:true});
     },
     reconcile() {
       if(dead||!enabled)return;
@@ -114,7 +157,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       if(!state.profilePending)revision++;
       state = {...state,screen};
       list.navigate(state.tab === 'clan' && screen === 'discover'?'discover':'create');emit();
-      if(screen === 'members' && state.clan)void members();
+      if(screen === 'members' && state.clan)void members({withRole:true});
     },
     tab(tab) {
       if (dead || tab === state.tab) return;
@@ -124,12 +167,12 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       list.navigate(tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
       emit(); onEvent('tab',{tab});
     },
-    async create({name}) {
+    async create({name,badge,description,tag}) {
       if (dead || !enabled || !state.membershipKnown || state.createPending || state.clan) return;
       const currentVisit = visit;
       state = {...state, createPending:true, error:''}; emit();
       try {
-        const clan = await sdk.createClan({name}); // No badge/tag/description wire fields exist.
+        const clan = await sdk.createClan({name,...(badge==null?{}:{badge}),...(description===undefined?{}:{description}),...(tag===undefined?{}:{tag})});
         if (dead || currentVisit !== visit) return;
         onEvent('created',{clanId:clan.id}); await membership('home');
       } catch (error) { if (!dead && currentVisit === visit) fail(error); }
@@ -139,7 +182,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       if (dead || enabled === value) return;
       enabled = value; revision++; visit++;membershipGeneration++;
       list.setEnabled(false);
-      state = {...state, status:'idle', profilePending:false, membershipKnown:false,leavePending:false,leaveError:''}; emit();
+      state = {...state, status:'idle', profilePending:false, membershipKnown:false,leavePending:false,leaveError:'',memberPending:null,memberError:''}; emit();
       if (value) void membership();
     },
     destroy() { dead = true; revision++; visit++; list.destroy(); },

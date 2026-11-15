@@ -21,7 +21,6 @@ for (const [format, filename] of [['iife', 'clan-sdk.js'], ['esm', 'clan-sdk.esm
     target: 'es2022',
     format,
     ...(format === 'iife' ? {globalName: 'ClanSDK'} : {}),
-    define: {__CLAN_STANDALONE__: 'true'},
     minify: true,
     legalComments: 'inline',
     banner: {js: `/*! Clan SDK v${version} */`},
@@ -29,7 +28,7 @@ for (const [format, filename] of [['iife', 'clan-sdk.js'], ['esm', 'clan-sdk.esm
     write: false,
     metafile: true,
   });
-  // A distribution must be a single script, with no external imports or CSS files.
+  // UI code/styles stay in one file. Curated fonts load at runtime from Google.
   if (result.outputFiles.length !== 1 || Object.values(result.metafile.outputs).some(output => output.imports.length)) {
     throw new Error(`${filename} is not self-contained`);
   }
