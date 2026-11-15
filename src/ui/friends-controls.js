@@ -33,24 +33,25 @@ export function decorateFriends(shadow,data,labels) {
     // Search results are already server-filtered; the shared local name-only
     // filter must not hide the server's authoritative rows.
     if(searching)row.hidden=false;
-    // The shared preview opens friend management for every identity. Live rows
-    // already have SDK actions based on the server's relationship to the player.
+    const manageable=player.relation==='friend';
     const identity=row.querySelector('.sk-friend-select');
     if(identity){
-      identity.disabled=true;
-      identity.setAttribute('aria-label',player.name);
-      identity.removeAttribute('aria-expanded');
+      identity.disabled=busy||!manageable;
+      if(!manageable){identity.setAttribute('aria-label',player.name);identity.removeAttribute('aria-expanded');}
     }
-    row.querySelector('.sk-member-panel')?.remove();
+    if(!manageable)row.querySelector('.sk-member-panel')?.remove();
+    row.querySelectorAll('.sk-member-panel button').forEach(button=>{button.disabled=busy;});
     // The name/avatar selector is also a button; only hide the Chat action.
-    const chat=row.querySelector('button.sk-btn:not(.sk-friend-select):not([data-friend-action])');
+    const chat=row.querySelector('.sk-friend-row > button.sk-btn');
     if(chat)chat.hidden=player.relation!=='friend';
     if(player.relation==='request_sent')action(row,'cancel',player.requestId,labels.cancel);
     else if(player.relation==='request_received'){
       action(row,'accept',player.requestId,labels.accept);action(row,'decline',player.requestId,'Decline');
     }else if(player.relation==='none')action(row,'send',player.id,'Add friend');
-    else action(row,'remove',player.id,'Remove friend');
+    else if(player.relation==='blocked')action(row,'unblock',player.id,'Unblock');
+    else {action(row,'remove',player.id,'Remove friend');row.querySelector('[data-friend-action="remove"]').hidden=Boolean(row.querySelector('.sk-member-panel'));}
   });
+  shadow.querySelectorAll('.sk-blocked-list button').forEach(button=>{button.disabled=busy;});
   const section=shadow.querySelector('.sk-content > .sk-section');
   if(searching)text(section,`Players · ${data.friends?.length??0}`);
   const status=shadow.querySelector('[data-sdk-status]');

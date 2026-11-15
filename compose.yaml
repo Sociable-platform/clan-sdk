@@ -1,5 +1,13 @@
 services:
   sdk:
     image: clan-sdk
+    build:
+      context: .
+      secrets:
+        - gitlab_npm_token
     ports:
       - "127.0.0.1:18080:8080"
+
+secrets:
+  gitlab_npm_token:
+    environment: GITLAB_NPM_TOKEN

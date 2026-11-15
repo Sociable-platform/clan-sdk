@@ -1,10 +1,11 @@
-import {friendPlayer,friendList,friendRequests,playerResults} from '../social/friends-adapter.js';
+import {friendPlayer,friendList,friendRequests,playerResults,blockedPlayers} from '../social/friends-adapter.js';
 
-export function createFriendsController({sdk,onChange,debounceMs=250}) {
+export function createFriendsController({sdk,onChange,onMutation=()=>{},debounceMs=250}) {
   let dead=false,enabled=false,active=false,revision=0,searchRevision=0,timer;
-  let state={status:'idle',player:null,friends:[],incoming:[],outgoing:[],query:'',players:[],searchStatus:'idle',error:'',searchError:'',actionError:'',pending:null};
+  let mutation=null,refreshQueued=false,backgroundQueued=false;
+  let state={status:'idle',player:null,friends:[],blocked:[],incoming:[],outgoing:[],query:'',players:[],searchStatus:'idle',error:'',searchError:'',actionError:'',pending:null};
   const emit=()=>{if(!dead)onChange({...state});};
-  const valid=ticket=>!dead&&enabled&&active&&ticket===revision;
+  const valid=(ticket,background=false)=>!dead&&enabled&&(active||background)&&ticket===revision;
   const invalidate=()=>{revision++;searchRevision++;clearTimeout(timer);};
   async function searchNow() {
     clearTimeout(timer);
@@ -19,21 +20,24 @@ export function createFriendsController({sdk,onChange,debounceMs=250}) {
     }catch(error){if(!valid(visit)||ticket!==searchRevision)return;state={...state,searchStatus:'error',searchError:error.message};}
     emit();
   }
-  async function refresh({preserveActionError=false}={}) {
-    if(dead||!enabled||!active)return;
+  async function refresh({preserveActionError=false,background=false}={}) {
+    if(dead||!enabled||!active&&!background)return;
+    // Realtime refreshes must not clear the in-flight mutation guard or race
+    // its acknowledgement with a pre-mutation snapshot.
+    if(mutation){refreshQueued=true;backgroundQueued ||= background;return;}
     invalidate();const ticket=revision;
     state={...state,status:'loading',error:'',pending:null,searchError:'',...(preserveActionError?{}:{actionError:''})};emit();
     try {
       const player=friendPlayer(await sdk.getMyPlayer());
-      if(!valid(ticket))return;
+      if(!valid(ticket,background))return;
       if(state.player&&(player.id!==state.player.id||player.gameId!==state.player.gameId)) {
-        state={...state,player,friends:[],incoming:[],outgoing:[],players:[]};emit();
+        state={...state,player,friends:[],blocked:[],incoming:[],outgoing:[],players:[]};emit();
       }
-      const [friends,requests]=await Promise.all([sdk.listFriends(),sdk.listFriendRequests()]);
-      if(!valid(ticket))return;
-      state={...state,player,friends:friendList(friends),...friendRequests(requests),status:'ready'};emit();
-      if(state.query.trim())await searchNow();
-    }catch(error){if(!valid(ticket))return;state={...state,status:'error',error:error.message};emit();}
+      const [friends,requests,blocks]=await Promise.all([sdk.listFriends(),sdk.listFriendRequests(),sdk.listBlocks()]);
+      if(!valid(ticket,background))return;
+      state={...state,player,friends:friendList(friends),blocked:blockedPlayers(blocks),...friendRequests(requests),status:'ready'};emit();
+      if(active&&state.query.trim())await searchNow();
+    }catch(error){if(!valid(ticket,background))return;state={...state,status:'error',error:error.message};emit();}
   }
   return {
     setView(nextEnabled,nextActive) {
@@ -41,7 +45,7 @@ export function createFriendsController({sdk,onChange,debounceMs=250}) {
       if(enabled===nextEnabled&&active===nextActive)return;
       const enter=nextEnabled&&nextActive&&(!enabled||!active);
       enabled=nextEnabled;active=nextActive;
-      if(!enabled||!active){invalidate();state={...state,pending:null};if(!enabled)state={...state,player:null,friends:[],incoming:[],outgoing:[],players:[],status:'idle'};emit();}
+      if(!enabled||!active){invalidate();if(!enabled)state={...state,player:null,friends:[],blocked:[],incoming:[],outgoing:[],players:[],pending:null,status:'idle'};emit();}
       else if(enter)void refresh();
     },
     search(query) {
@@ -52,26 +56,36 @@ export function createFriendsController({sdk,onChange,debounceMs=250}) {
     },
     refresh,
     async action(action,id) {
-      if(dead||!enabled||!active||state.status!=='ready'||state.pending)return;
-      const methods={send:'sendFriendRequest',accept:'acceptFriendRequest',decline:'declineFriendRequest',cancel:'cancelFriendRequest',remove:'removeFriend'};
+      if(dead||!enabled||!active||state.status!=='ready'||mutation)return;
+      const methods={send:'sendFriendRequest',accept:'acceptFriendRequest',decline:'declineFriendRequest',cancel:'cancelFriendRequest',remove:'removeFriend',block:'blockPlayer',unblock:'unblockPlayer'};
       if(!methods[action])return;
       // Only displayed, server-backed objects are actionable. Never substitute a
       // game's externalId for a Social UUID or a player ID for a request ID.
       const displayed=action==='send'?state.players.some(p=>p.id===id&&p.relation==='none'&&id!==state.player.id)
-        :action==='remove'?state.friends.some(p=>p.id===id)||state.players.some(p=>p.id===id&&p.relation==='friend')
+        :action==='remove'||action==='block'?id!==state.player.id&&(state.friends.some(p=>p.id===id)||state.players.some(p=>p.id===id&&p.relation==='friend'))
+        :action==='unblock'?state.blocked.some(p=>p.id===id)||state.players.some(p=>p.id===id&&p.relation==='blocked')
         :action==='cancel'?state.outgoing.some(r=>r.id===id)||state.players.some(p=>p.requestId===id&&p.relation==='request_sent')
         :state.incoming.some(r=>r.id===id)||state.players.some(p=>p.requestId===id&&p.relation==='request_received');
       if(!displayed)return;
       const ticket=revision;searchRevision++;clearTimeout(timer);
+      const operation={action,id};mutation=operation;
       state={...state,pending:{action,id},actionError:''};emit();
+      let succeeded=false,failure;
       try {
         await sdk[methods[action]](action==='send'?{playerId:id}:id);
-        if(!valid(ticket))return;
-        await refresh(); // Covers both 201 request and reciprocal-send 200 friend.
+        succeeded=true;
+        if(!dead)onMutation(action,id);
       }catch(error){
-        if(!valid(ticket))return;
-        state={...state,pending:null,actionError:error.message};emit();
-        if([404,409].includes(error.status))await refresh({preserveActionError:true});
+        failure=error;
+        if(valid(ticket))state={...state,actionError:error.message};
+      }finally{
+        if(mutation===operation)mutation=null;
+        if(dead)return;
+        state={...state,pending:null};
+        const queued=refreshQueued,background=backgroundQueued||succeeded;
+        refreshQueued=false;backgroundQueued=false;
+        if(succeeded||queued||[404,409].includes(failure?.status))await refresh({preserveActionError:Boolean(failure),background});
+        else emit();
       }
     },
     destroy(){dead=true;invalidate();},

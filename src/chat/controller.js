@@ -13,12 +13,13 @@ const fault=(message,code='chat_unavailable')=>Object.assign(new Error(message),
 export const COUNTDOWN_FROM_SECONDS=4;
 // The server's fixed wait after a rate_limited rejection; long enough to always show the countdown.
 const RATE_LIMIT_WAIT_MS=5000;
-export function createChatController({client,onChange,onNotification=()=>{},onMembership=()=>{},onSuspend=()=>{},onConfig=()=>{},isVisible=()=>true,socketFactory=url=>new WebSocket(url),random=Math.random,now=Date.now,ackTimeout=10000,handshakeTimeout=10000}) {
+export function createChatController({client,onChange,onNotification=()=>{},onReconnect=()=>{},onMembership=()=>{},onSuspend=()=>{},onConfig=()=>{},isVisible=()=>true,socketFactory=url=>new WebSocket(url),random=Math.random,now=Date.now,ackTimeout=10000,handshakeTimeout=10000}) {
   let dead=false,enabled=false,config={},clanId=null,socket,epoch=0,attempt=0,authTried=false,forceNext=false;
   let reconnectTimer,helloTimer,stableTimer,cooldownTimer,sequence=0,listRevision=0,selectedKey=null,rejectedVersion;
   let state={status:client?'idle':'unavailable',playerId:null,gameId:null,conversations:[],messages:{},history:{},error:'',pending:null,cooldownUntil:0,cooldownCountdown:false};
   const pending=new Map(),loading=new Map(),recoveryAnchors=new Map(),roomRevisions=new Map(),revokedClans=new Set(),revokedRooms=new Map(),readPositions=new Map(),knownRooms=new Map();
   let suspended=false;
+  let connectedBefore=false,blockedPeers=new Set();
   const emit=()=>{if(!dead)onChange({...state});};
   // The game's slow mode from the published config. The server enforces it (per player, across all chats);
   // the SDK mirrors it so Send is disabled for the wait instead of sending a message that will be refused.
@@ -29,7 +30,8 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
     cooldownTimer=setTimeout(()=>{state={...state,cooldownUntil:0,cooldownCountdown:false};emit();},ms);
   }
   const valid=ticket=>!dead&&enabled&&ticket===epoch;
-  const allowed=c=>config.chat?.enabled===true&&(c.kind==='dm'?config.chat.directMessages===true:config.chat.clanChat===true&&config.clan?.enabled===true&&c.clanId===clanId);
+  const peerBlocked=c=>c.kind==='dm'&&c.members.some(p=>blockedPeers.has(p.id));
+  const allowed=c=>config.chat?.enabled===true&&!peerBlocked(c)&&(c.kind==='dm'?config.chat.directMessages===true:config.chat.clanChat===true&&config.clan?.enabled===true&&c.clanId===clanId);
   const room=key=>state.conversations.find(c=>allowed(c)&&(key==='clan'?c.kind==='clan'&&c.clanId===clanId:c.kind==='dm'&&c.members.some(p=>p.id===key&&p.id!==state.playerId)));
   const sorted=messages=>[...new Map(messages.map(m=>[m.id,m])).values()].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)||a.id.localeCompare(b.id));
   function merge(id,messages){state={...state,messages:{...state.messages,[id]:sorted([...(state.messages[id]??[]),...messages])}};}
@@ -105,7 +107,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
       const raw=await client.listConversations();if(!valid(ticket))return;
       if(revision!==listRevision)return; // An event/read already replaced this snapshot.
       if(!Array.isArray(raw.conversations))throw fault('Invalid Realtime conversation list.');
-      const conversations=raw.conversations.map(conversationDTO).filter(c=>!revokedRooms.has(c.id)&&(c.kind!=='clan'||!revokedClans.has(c.clanId)));
+      const conversations=raw.conversations.map(conversationDTO).filter(c=>!peerBlocked(c)&&!revokedRooms.has(c.id)&&(c.kind!=='clan'||!revokedClans.has(c.clanId)));
       for(const c of conversations)knownRooms.set(c.id,c);
       const ids=new Set(conversations.map(c=>c.id));for(const id of Object.keys(state.messages))if(!ids.has(id))remove(id);
       state={...state,conversations,error:'',listLoading:false};emit();
@@ -148,6 +150,8 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
           if(frame.type==='hello'){
             if(wasHello||typeof d.playerId!=='string'||typeof frame.game_id!=='string')return;
             wasHello=true;clearTimeout(helloTimer);
+            if(connectedBefore){for(const [id,clan]of revokedRooms)if(!clan)revokedRooms.delete(id);onReconnect();}
+            connectedBefore=true;
             if(state.playerId&&(state.playerId!==d.playerId||state.gameId!==frame.game_id)){recoveryAnchors.clear();knownRooms.clear();revokedClans.clear();revokedRooms.clear();state={...state,conversations:[],messages:{},history:{}};}
             state={...state,playerId:d.playerId,gameId:frame.game_id,status:'connected',error:'',history:Object.fromEntries(Object.entries(state.history).map(([id,h])=>[id,{...h,loaded:false}]))};
             stableTimer=setTimeout(()=>{attempt=0;authTried=false;},10000);emit();void refresh();if(d.configVersion>0)onConfig({version:d.configVersion,source:'hello'});return;
@@ -183,8 +187,8 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
               const old=state.conversations.find(c=>c.id===d.conversationId)??knownRooms.get(d.conversationId);revokedRooms.set(d.conversationId,old?.clanId);remove(d.conversationId);
               if(old?.kind==='clan'){revokedClans.add(old.clanId);onMembership({kind:'removed',clanId:old.clanId});}
             }
-            else{const c=conversationDTO(d.conversation);if(c.kind==='clan'&&revokedClans.has(c.clanId)){onMembership({kind:'verify',clanId:c.clanId});return;}revokedRooms.delete(c.id);knownRooms.set(c.id,c);state={...state,conversations:[...state.conversations,c]};if(c.kind==='clan')onMembership({kind:'added',clanId:c.clanId});}
-            emit();void refresh();
+            else{const c=conversationDTO(d.conversation);if(peerBlocked(c))return;if(c.kind==='clan'&&revokedClans.has(c.clanId)){onMembership({kind:'verify',clanId:c.clanId});return;}revokedRooms.delete(c.id);knownRooms.set(c.id,c);state={...state,conversations:[...state.conversations,c]};if(c.kind==='clan')onMembership({kind:'added',clanId:c.clanId});}
+            emit();onNotification({kind:'relationship_changed'});void refresh();
           }else if(frame.type==='presence.update'){
             if(!['online','offline'].includes(d.status))return;
             state={...state,conversations:state.conversations.map(c=>c.kind==='dm'?({...c,members:c.members.map(m=>m.id===d.playerId?{...m,online:d.status==='online'}:m)}):c)};emit();
@@ -202,6 +206,26 @@ export function createChatController({client,onChange,onNotification=()=>{},onMe
     }catch{if(valid(ticket)){state={...state,error:'Unable to connect to Realtime.'};retry(1006,false);}}
   }
   return {
+    forgetPeer(id) {
+      if(dead)return;
+      listRevision++;
+      for(const c of [...state.conversations])if(c.kind==='dm'&&c.members.some(p=>p.id===id)){
+        revokedRooms.set(c.id,null);remove(c.id);
+      }
+      if(selectedKey===id)selectedKey=null;
+      emit();
+    },
+    setPlayerBlocked(id,blocked) {
+      if(dead)return;
+      if(blocked){blockedPeers.add(id);this.forgetPeer(id);}else blockedPeers.delete(id);
+    },
+    setBlockedPlayers(ids) {
+      if(dead)return;
+      const next=new Set(ids);
+      if(next.size===blockedPeers.size&&[...next].every(id=>blockedPeers.has(id)))return;
+      blockedPeers=next;
+      for(const id of ids)this.forgetPeer(id);
+    },
     configure(next,nextClanId) {
       if(suspended||dead)return;
       const before=config,previouslyAllowed=new Set(state.conversations.filter(allowed).map(c=>c.id));

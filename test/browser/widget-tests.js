@@ -9,6 +9,7 @@ import {registerFriendsTests} from './friends-tests.js';
 import {registerChatTests} from './chat-tests.js';
 import {registerLeaveTests} from './leave-tests.js';
 import {registerClanChatTests} from './clan-chat-tests.js';
+import {registerBlockTests} from './block-tests.js';
 
 const sandbox=document.querySelector('#sandbox'),results=document.querySelector('#results'),cases=[];
 const test=(name,run)=>cases.push({name,run});
@@ -99,6 +100,7 @@ registerFriendsTests({test,assert,container});
 registerChatTests({test,assert,container});
 registerLeaveTests({test,assert,container});
 registerClanChatTests({test,assert,container});
+registerBlockTests({test,assert,container});
 let failures=0;
 // Let settled token/HTTP microtasks drain before the next case installs its
 // recording fetch. Abandoned requests must not contaminate another fixture.

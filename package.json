@@ -1,6 +1,6 @@
 {
   "name": "clan-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Plain JavaScript Social client for the clan widget SDK",
   "type": "module",
@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/social-client.test.js test/social-contract.test.js test/platform-config.test.js test/chat-config.test.js test/widget-api.test.js test/chat-state.test.js test/config-load.test.js test/experience-config.test.js test/discover.test.js test/shared-widget.test.js test/friends-client.test.js test/friends-controller.test.js test/token.test.js test/chat-live.test.js test/ui-package.test.js test/leave.test.js test/clan-chat.test.js test/config-revision.test.js",
+    "test": "node --test test/social-client.test.js test/social-contract.test.js test/platform-config.test.js test/chat-config.test.js test/widget-api.test.js test/chat-state.test.js test/config-load.test.js test/experience-config.test.js test/discover.test.js test/shared-widget.test.js test/friends-client.test.js test/friends-controller.test.js test/token.test.js test/chat-live.test.js test/ui-package.test.js test/leave.test.js test/clan-chat.test.js test/config-revision.test.js test/block.test.js",
     "test:browser": "node test/browser/server.js",
     "test:bundle": "node test/browser/bundle-runner.mjs",
     "preview": "node test/browser/server.js"
@@ -21,7 +21,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@clan/ui": "^0.1.0"
+    "@clan/ui": "^0.1.30"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
