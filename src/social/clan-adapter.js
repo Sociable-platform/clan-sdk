@@ -1,3 +1,13 @@
+/** Social's MemberRole DTO returned by promote/demote. */
+export function memberRoleAdapter(value) {
+  if (!value || typeof value !== 'object'
+    || typeof value.playerId !== 'string' || !value.playerId.trim()
+    || typeof value.role !== 'string' || !value.role.trim()) {
+    throw new TypeError('Social member role response must contain playerId and role.');
+  }
+  return {id:value.playerId, role:value.role, ...(typeof value.displayName === 'string' && value.displayName.trim() ? {name:value.displayName} : {})};
+}
+
 /** Discover mapping for Social's ClanList DTO, confirmed in
  * services/social/internal/handler/clans.go and openapi/social.yaml.
  * Core HTTP methods still return successful JSON unchanged.

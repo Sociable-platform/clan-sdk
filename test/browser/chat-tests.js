@@ -32,6 +32,18 @@ export function registerChatTests({test,assert,container}) {
   assert(!a.root.querySelector('[data-chat-action]'),'SDK injected extra chat buttons');assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');
   sockets[0].frame('message.new',{conversationId:room.id,message:message('live','Immediate live message')});await waitFor(()=>a.root.textContent.includes('Immediate live message'));assert(a.root.querySelectorAll('.sk-msg').length===1,'Incoming message duplicated');sockets[0].frame('message.new',{conversationId:room.id,message:message('mine','Authenticated own message',me)});await waitFor(()=>a.root.querySelector('[data-mine="true"] .sk-bubble')?.textContent==='Authenticated own message');assert(a.root.querySelectorAll('.sk-msg').length===2,'Authenticated player ID did not classify own messages');
  }));
+ test('a full chat stays pinned to the newest message after load, own send and SDK status changes; a reader who scrolled up stays put',()=>fixture(async({mount,ready,sockets,messages})=>{
+  for(let i=0;i<30;i++)messages.push(message('fill'+i,'Earlier message '+i+' with enough text to wrap inside its bubble',i%2?me:peer));
+  const a=mount();await ready(a);await waitFor(()=>a.root.querySelectorAll('.sk-msg').length===30);await sleep(50);
+  const chat=()=>a.root.querySelector('[data-key="chat"]'),gap=()=>{const c=chat();return c.scrollHeight-c.scrollTop-c.clientHeight;};
+  assert(chat().scrollHeight>chat().clientHeight,'Fixture does not overflow the message list');assert(gap()<1,`Loaded list stops ${gap()}px short of the newest message`);
+  type(a.root,'message','A long own message that wraps over several lines in its bubble so a clipped bottom edge is easy to see');a.root.querySelector('.sk-composer button').click();
+  const ws=sockets[0],sent=ws.sent.filter(f=>f.type==='message.send').at(-1),own=message('own-new',sent.data.body,me);
+  ws.frame('message.ack',{replyTo:sent.id,messageId:own.id,createdAt:own.createdAt});ws.frame('message.new',{conversationId:room.id,message:own});
+  await waitFor(()=>a.root.querySelector('[data-key="message"]').value==='');await sleep(50);assert(gap()<1,`Own message is clipped by ${gap()}px`);
+  chat().scrollTop=0;await sleep(20);ws.frame('message.new',{conversationId:room.id,message:message('reply','A reply while reading history')});
+  await waitFor(()=>a.root.textContent.includes('A reply while reading history'));await sleep(50);assert(chat().scrollTop<5,'Reader who scrolled up was pulled to the end');
+ }));
  test('live Chat retains draft during pending/error, prevents duplicates and only clears on ACK',()=>fixture(async({mount,ready,sockets,messages})=>{
   const a=mount();await ready(a);const input=type(a.root,'message','Draft to send');input.focus();a.root.querySelector('.sk-composer button').click();a.root.querySelector('.sk-composer button').click();
   const ws=sockets[0],sent=ws.sent.filter(f=>f.type==='message.send');assert(sent.length===1&&sent[0].data.conversationId===room.id,'Duplicate/wrong room');assert(a.root.querySelector('[data-key="message"]').value==='Draft to send','Pending draft lost');

@@ -14,6 +14,9 @@ const clients = new WeakMap();
 // existing five own Social operations. Construction/import never touches the DOM.
 class SDK {
   leaveClan(clanId) { return clients.get(this).leaveClan(clanId); }
+  kickClanMember(clanId,playerId) { return clients.get(this).kickClanMember(clanId,playerId); }
+  promoteClanMember(clanId,playerId) { return clients.get(this).promoteClanMember(clanId,playerId); }
+  demoteClanMember(clanId,playerId) { return clients.get(this).demoteClanMember(clanId,playerId); }
   listConversations() { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listConversations(); }
   listMessages(id,options) { const client=chatClient(this);if(!client)throw new TypeError('Provide realtimeUrl to use chat.');return client.listMessages(id,options); }
   getMyPlayer() { return clients.get(this).friends.getMyPlayer(); }

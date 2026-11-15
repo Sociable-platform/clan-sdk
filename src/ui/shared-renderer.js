@@ -13,8 +13,26 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
   const fonts = widgetFonts(doc);
   const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
 
+  // The shared UI pins the message list to its newest message on repaint. SDK
+  // decoration runs after that; keep its status line from shrinking the list
+  // underneath (an empty flex item still adds .sk-content's 10px gap) and re-pin
+  // a list that was at its end. A reader who scrolled up is left where they are.
   function decorate() {
     if (destroyed || !live || !shadow) return;
+    const chat=shadow.querySelector('[data-key="chat"]');
+    const pinned=chat&&chat.scrollHeight-chat.scrollTop-chat.clientHeight<24;
+    decorateNow();
+    const status=shadow.querySelector('[data-sdk-status]');
+    if(status){
+      const empty=!status.textContent.trim()&&!status.querySelector('button');
+      // Out of flow, not display:none, so the polite live region stays announced.
+      const style=empty?'position:absolute;top:0;left:0;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap':'';
+      if(status.style.cssText!==style)status.style.cssText=style;
+    }
+    const next=shadow.querySelector('[data-key="chat"]');
+    if(pinned&&next&&next.scrollHeight-next.scrollTop-next.clientHeight>0)next.scrollTop=next.scrollHeight;
+  }
+  function decorateNow() {
     const composer=shadow.querySelector('[data-key="message"]');
     if(purgeDraft&&composer){purgeDraft=false;composer.value='';composer.dispatchEvent(new doc.defaultView.Event('input',{bubbles:true}));}
     const state = data.sdkState ?? {};
@@ -30,7 +48,10 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     const content = shadow.querySelector('.sk-content');
     if (!content) return;
     let status = content.querySelector('[data-sdk-status]');
-    let message = state.leavePending?'Leaving clan…':state.leaveError || state.error || state.joinError || '';
+    const busy={promote:'Promoting member…',demote:'Demoting member…',kick:'Removing member…'};
+    let message = state.leavePending?'Leaving clan…':state.memberPending?busy[state.memberPending.action]:state.leaveError || state.memberError || state.error || state.joinError || '';
+    // Members-panel Add friend / Cancel report through the Friends controller.
+    if (data.tab === 'clan' && data.screen === 'members' && !message) message = state.friends?.pending ? 'Updating friend request…' : state.friends?.actionError || '';
     if (data.tab === 'friends') {
       const friends=state.friends;
       message=friends?.error||friends?.actionError||friends?.searchError||'';
@@ -125,8 +146,12 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         button.disabled=Boolean(state.leavePending||state.profilePending||!data.clan);
         button.title=state.leavePending?'Leaving clan…':'';
       } else if (/^(Promote|Demote|Kick)/.test(label)) {
-        button.disabled = true;
-        button.title = 'Backend operation unavailable';
+        // @clan/ui offers only what the viewer's role allows; Social still decides.
+        button.disabled = Boolean(state.memberPending || state.profilePending || state.leavePending || !data.clan);
+        button.title = state.memberPending ? busy[state.memberPending.action] : '';
+      } else if (button.closest('.sk-member-panel') && /^(Add |Cancel friend request)/.test(label)) {
+        button.disabled = state.friends?.status !== 'ready' || Boolean(state.friends?.pending);
+        button.title = state.friends?.status === 'loading' ? 'Loading friends…' : '';
       }
     });
     if(data.tab==='friends')decorateFriends(shadow,data,labels);

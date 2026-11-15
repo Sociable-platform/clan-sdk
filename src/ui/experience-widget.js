@@ -9,6 +9,7 @@ import {playerSession} from '../social/session.js';
 import {chatClient} from '../chat/client.js';
 import {createChatController} from '../chat/controller.js';
 import {chatView} from '../chat/view.js';
+import {roleStep} from '../config/roles.js';
 
 export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdapter,assets={},previewData}={}, {validate=true}={}) {
   assertContainerAvailable(container);
@@ -27,12 +28,25 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     const view=chatView(chatState,current,state?.clan);
     const searching=state?.tab==='friends'&&Boolean(friendState?.query.trim());
     const self=chatState?.conversations.flatMap(room=>room.members).find(member=>member.id===chatState.playerId);
-    return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:state?.members??[],messages:view.messages,
+    const roster=state?.members??[],outgoing=friendState?.outgoing??[];
+    // Members-panel friend offer: only confirmed Friends state says what a member is to the viewer.
+    const relation=member=>{
+      if(friendState?.status!=='ready')return member;
+      const sent=outgoing.find(r=>r.playerId===member.id),received=friendState.incoming.find(r=>r.playerId===member.id);
+      return {...member,...sent?{relation:'request_sent',requestId:sent.id}:received?{relation:'request_received',requestId:received.id}
+        :friendState.blocked.some(p=>p.id===member.id)?{relation:'blocked'}:friendState.friends.some(p=>p.id===member.id)?{relation:'friend'}:{relation:'none'}};
+    };
+    return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:roster.map(relation),messages:view.messages,
       friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
-      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id)}};
+      actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id),
+        addFriend:id=>friendActions.action('send',id),cancelFriendRequest:(playerId,requestId)=>friendActions.action('cancel',requestId??outgoing.find(r=>r.playerId===playerId)?.id),
+        setRole:(id,role)=>{const member=roster.find(m=>m.id===id),step=member&&roleStep(current,member.role,role);if(step)clanActions.manageMember(step,id);},
+        kick:id=>clanActions.manageMember('kick',id)}};
   }
   const render=()=>renderer.update(current,data());
+  // Members also needs Friends state: its panel offers Add friend / Cancel.
+  const friendsActive=()=>state?.tab==='friends'||state?.tab==='clan'&&state?.screen==='members';
   const defaultTab=()=>current.clan?.enabled===true?'clan':current.friends?.enabled===true?'friends':'chat';
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
@@ -41,14 +55,14 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
-    friends=createFriendsController({sdk,onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.forgetPeer(id);}});
+    friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.forgetPeer(id);}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{
-      state=next;render();if(live){friends.setView(current.friends?.enabled===true,state.tab==='friends');chat.configure(current,state.clan?.id);}
+      state=next;render();if(live){friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state.clan?.id);}
     },onEvent:notify});
     render();
     if(live){
       if(defaultTab()!=='clan')controller.tab(defaultTab());
-      void controller.start();friends.setView(current.friends?.enabled===true,state?.tab==='friends');chat.configure(current,state?.clan?.id);
+      void controller.start();friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state?.clan?.id);
     }
   }
   try {boot();container.append(host);reserveContainer(container);}
@@ -66,7 +80,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       if(live){
         controller.setEnabled(current.clan?.enabled===true);controller.reconcile();
         if(state?.tab==='friends'&&current.friends?.enabled!==true||state?.tab==='clan'&&current.clan?.enabled!==true||state?.tab==='chat'&&current.chat?.enabled!==true)controller.tab(defaultTab());
-        friends.setView(current.friends?.enabled===true,state?.tab==='friends');
+        friends.setView(current.friends?.enabled===true,friendsActive());
         chat.configure(current,state?.clan?.id);
       }
     },
