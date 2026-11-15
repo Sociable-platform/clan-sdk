@@ -72,7 +72,7 @@ export function registerClanManageTests({test,assert,container}) {
   const post=calls.find(c=>c.url.endsWith('/friends/requests')&&c.method==='POST');assert(JSON.parse(post.body).playerId===memberId&&sent.send===1,'Wrong friend request');
   await waitFor(()=>!button(open(root),'Cancel friend request to Leyla').disabled);button(open(root),'Cancel friend request to Leyla').click();
   await waitFor(()=>button(open(root),'Add Leyla as a friend'));assert(sent.cancel===1&&calls.some(c=>c.url.endsWith('/friends/requests/req-1')&&c.method==='DELETE'),'Cancel not sent');
-  assert(open(root,friend.id).textContent.includes('are friends'),'Existing friend offered Add friend');
+  assert(open(root,friend.id).textContent.includes('Friends'),'Existing friend offered Add friend');
  }));
 
  test('destroy during a pending kick ignores the late answer',()=>{const gate=deferred();return fixture(async({mountMembers,sent})=>{

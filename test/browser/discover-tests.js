@@ -16,7 +16,7 @@ export function registerDiscoverTests({test,assert,container}) {
     },async({mount,calls})=>{
       const cfg=currentConfig();cfg.clan.badges.allowed=['star','diamond','moon'];cfg.clan.tags=true;
       const first=mount(cfg),{root}=first;await waitFor(()=>root.textContent.includes('No clans found'));button(root,'Create').click();
-      type(root,'name','Moon farmers');type(root,'description','Moon harvests');type(root,'tag','moon');
+      type(root,'name','Moon farmers');type(root,'description','Moon harvests');assert(!root.querySelector('[data-key="tag"]'),'Removed tag field rendered');
       root.querySelector('[data-key="badge-trigger"]').click();
       const moon=root.querySelector('[data-key="badge-moon"]');assert(!moon.disabled,'Badge choice disabled');moon.click();
       assert(!root.querySelector('[role="dialog"]')&&root.querySelector('[data-key="badge-trigger"]').textContent==='☾','Badge choice did not close/save');
@@ -26,9 +26,9 @@ export function registerDiscoverTests({test,assert,container}) {
       await waitFor(()=>root.textContent.includes('Please try again')&&!root.querySelector('[data-key="badge-trigger"]').disabled);
       assert(root.querySelector('[data-key="badge-trigger"]').textContent==='☾'&&root.querySelector('[data-key="name"]').value==='Moon farmers','Failure lost form values');
       button(root,'Create clan').click();await waitFor(()=>root.querySelector('.sk-card-title')?.textContent.includes('Moon farmers'));
-      const writes=calls.filter(c=>c.method==='POST');assert(writes.length===2&&writes.every(c=>c.url.endsWith('/api/v1/clans')&&c.body===JSON.stringify({name:'Moon farmers',badge:'moon',description:'Moon harvests',tag:'MOON'})),'Wrong create payload or duplicate write');
+      const writes=calls.filter(c=>c.method==='POST');assert(writes.length===2&&writes.every(c=>c.url.endsWith('/api/v1/clans')&&c.body===JSON.stringify({name:'Moon farmers',badge:'moon',description:'Moon harvests'})),'Wrong create payload or duplicate write');
       assert(root.querySelector('.sk-card-head .sk-badge').textContent==='☾'&&!root.querySelector('.sk-card-head .sk-badge').hidden,'Saved badge hidden');
-      button(root,'Show clan info').click();assert(root.querySelector('.sk-card-text').textContent==='Moon harvests'&&root.querySelector('.sk-tag').textContent==='[MOON]','Saved details missing');
+      button(root,'Show clan info').click();assert(root.querySelector('.sk-card-text').textContent==='Moon harvests','Saved details missing');
       first.handle.destroy();const next=mount(cfg);await waitFor(()=>next.root.querySelector('.sk-card-head .sk-badge')?.textContent==='☾');
       assert(!next.root.querySelector('.sk-card-head .sk-badge').hidden,'Badge lost on remount');
       next.handle.navigate('discover');await waitFor(()=>rows(next.root).length===1);

@@ -31,7 +31,7 @@ test('registry configuration keeps the exact literal placeholder and registry ra
   const config=await readFile(new URL('../.npmrc',import.meta.url),'utf8');
   assert.equal(config.replace(/\r\n/g,'\n'),'@clan:registry=https://gitlab.com/api/v4/groups/146782114/-/packages/npm/\n//gitlab.com/api/v4/groups/146782114/-/packages/npm/:_authToken=${GITLAB_NPM_TOKEN}\n');
   const pkg=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
-  assert.equal(pkg.dependencies['@clan/ui'],'^0.1.30');
+  assert.equal(pkg.dependencies['@clan/ui'],'^0.1.65');
 });
 test('dev resolver uses the public export and package metadata, not a hardcoded src layout',async t=>{
   const {pkg}=await fixture(t);assert.equal(pkg.entry,'dist/widget.mjs');assert.equal(pkg.version,'0.0.0-test');

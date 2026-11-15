@@ -40,7 +40,7 @@ npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
-new release just because `^0.1.30` allows one. To adopt a newer compatible release:
+new release just because `^0.1.65` allows one. To adopt a newer compatible release:
 
 ```sh
 npm update @clan/ui
@@ -50,7 +50,12 @@ npm run test:browser
 
 Include the resulting changed `package-lock.json` with every dependency update.
 Do not substitute `file:` links or copied repositories. The lockfile currently
-resolves registry release **0.1.30**, which is bundled into both browser formats.
+resolves registry release **0.1.65**, which is bundled into both browser formats.
+This renderer opens Chat on a conversation list; selecting a row opens its
+message history. The SDK reads the open header's `data-conversation` hook to
+route history, read receipts and sends to the correct Realtime conversation.
+The Blocked section is hidden when empty. The current Create form has no tag
+input; the low-level `createClan({tag})` option remains for existing integrations.
 See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
 `npm run build` is the canonical build command. It uses esbuild and produces
@@ -404,7 +409,7 @@ Live runtime flow:
 1. If clan is enabled, call `myClan()`. Only `404 not_in_clan` means no membership; other errors are visible with Retry.
 2. No clan → Discover → `listClans({q})`. Search is debounced 250 ms; stale results cannot replace newer searches. Server errors, loading, empty and retry are shown. Capacity comes from each response's `memberCount/maxMembers`, never from config. No runtime emblem, tag or description is fabricated.
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
-4. Create uses the supplied shared form and `createClan({name, badge?, description?, tag?})`. The badge picker offers the published allowed IDs and sends the selected ID, not its image. Description and the optional configured tag are saved through the same Social contract. No allowed badges means the nullable UI selection is omitted from the request. Duplicate writes are guarded; pending requests disable badge/details controls. Server errors retain the form for retry; success refreshes membership. Saved badges/details are mapped from backend responses and remain visible after reload and in Discover. Missing badge fields do not invent a saved selection.
+4. Create uses the supplied shared form and `createClan({name, badge?, description?})`. The badge picker offers the published allowed IDs and sends the selected ID, not its image. Description is saved through the same Social contract; the current renderer does not offer a tag field. No allowed badges means the nullable UI selection is omitted from the request. Duplicate writes are guarded; pending requests disable badge/details controls. Server errors retain the form for retry; success refreshes membership. Saved badges/details are mapped from backend responses and remain visible after reload and in Discover. Missing badge fields do not invent a saved selection.
 
 For an opt-in local-service badge/reload check, build first, set
 `LIVE_BADGE_DEV_KEY` to an external development signing-key path and
@@ -475,8 +480,8 @@ TEAM-250 verification: **298 Node tests**, **97 browser regression tests against
 built output with mocked services**, plus a separate live built-ESM browser check
 with two disposable players against local Social/Realtime. Block/unblock,
 reload persistence, both players' friendship/DM state, rejected messages in both
-directions and explicit re-friending passed. SDK **0.1.1** still bundles published
-`@clan/ui` **0.1.30**; no dependency change was needed. See
+directions and explicit re-friending passed. That original run used SDK **0.1.1**
+with published `@clan/ui` **0.1.30**; the current release is listed above. See
 [TEAM-250 results](TEAM-250.md) for contracts and the opt-in live command.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.

@@ -6,6 +6,12 @@ export const json=(value,status=200,etag)=>new Response(JSON.stringify(value),{s
 export const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 export const sleep=ms=>new Promise(done=>setTimeout(done,ms));
 export const waitFor=async predicate=>{for(let i=0;i<200;i++){if(predicate())return;await sleep(10);}throw new Error('Timed out waiting for UI');};
+export async function openDm(root,id) {
+  await waitFor(()=>root.querySelector('.sk-convo')||root.querySelector('[data-key="message"]'));
+  const row=id?root.querySelector(`[data-key="convo-${id}"]`):root.querySelector('.sk-convo');
+  if(row)row.click();
+  await waitFor(()=>root.querySelector('[data-key="message"]'));
+}
 export const sharedRoot=target=>target.querySelector('[data-clan-sdk-widget="experience"] [data-clan-ui]')?.shadowRoot;
 export const chatRoot=target=>target.querySelector('[data-clan-sdk-widget="chat"]')?.shadowRoot.querySelector('[data-clan-ui]')?.shadowRoot;
 export const rows=root=>[...root.querySelectorAll('.sk-content > .sk-row')];

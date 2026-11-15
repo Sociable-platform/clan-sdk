@@ -107,7 +107,7 @@ export function registerFriendsTests({test,assert,container}) {
   await waitFor(()=>root.querySelector('.sk-section').textContent==='Friends · 0'&&!root.textContent.includes('Loading friends'));
   const writes=calls.filter(c=>c.method==='DELETE');
   assert(writes.length===1&&writes[0].url.endsWith(`/friends/${friend.id}`)&&writes[0].body===undefined,'Wrong/duplicate Remove request');
-  assert(!root.querySelector('.sk-friend, .sk-member-panel, [data-friend-refresh]')&&root.querySelector('[data-key="player-search"]')&&root.querySelector('[data-key="blocked-toggle"]'),'Removed rows remain or persistent controls missing');
+  assert(!root.querySelector('.sk-friend, .sk-member-panel, [data-friend-refresh]')&&root.querySelector('[data-key="player-search"]')&&!root.querySelector('[data-key="blocked-toggle"]'),'Removed rows remain or persistent controls missing');
  }));
  test('returning to the visible game reloads friends/counts automatically and destroy removes that listener',()=>fixture(async({mount,store,calls})=>{
   const {root,handle}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));

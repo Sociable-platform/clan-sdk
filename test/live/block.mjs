@@ -64,7 +64,13 @@ try {
  for(const page of pages)assert.equal(await page.evaluate(()=>!root().querySelector('[data-friend-action="remove"], [data-friend-refresh], [data-sdk-status]')&&root().querySelector('.sk-friend').children.length===1),true);
  pass('compact Friends rows have no standalone Remove/Refresh controls or empty status row');
  const tab=async(page,name)=>page.evaluate(name=>[...root().querySelectorAll('.sk-tab')].find(b=>b.textContent===name).click(),name);
+ const openDm=async(page,id)=>{
+  await page.waitForFunction(id=>root().querySelector(`[data-key="convo-${id}"]`)||root().querySelector('[data-key="message"]'),id);
+  const row=page.locator(`[data-key="convo-${id}"]`);if(await row.count())await row.click();
+  await page.waitForFunction(()=>root().querySelector('[data-key="message"]')&&!root().textContent.includes('Loading messages'));
+ };
  await tab(pa,'Chat');await tab(pb,'Chat');
+ await openDm(pa,b.id);await openDm(pb,a.id);
  await pa.waitForFunction(()=>root().querySelector('[data-key="message"]')&&!root().textContent.includes('Loading messages'));
  const body='TEAM-250 live DM '+randomUUID();
  await pa.evaluate(body=>{const input=root().querySelector('[data-key="message"]');input.value=body;input.dispatchEvent(new Event('input',{bubbles:true}));root().querySelector('.sk-composer button').click();},body);
@@ -75,7 +81,7 @@ try {
  await pa.waitForFunction(()=>root().querySelector('[data-key="blocked-toggle"]')?.textContent.includes('1'));
  assert.equal((await clients.A.listBlocks()).blocks[0].id,b.id);
  assert.equal((await clients.A.listFriends()).friends.length,0);assert.equal((await clients.B.listFriends()).friends.length,0);
- await pb.waitForFunction(()=>!root().querySelector('.sk-chip')&&!root().querySelector('[data-key="message"]'));
+ await pb.waitForFunction(()=>!root().querySelector('.sk-convo, [data-conversation]')&&!root().querySelector('[data-key="message"]'));
  pass('shared Block action persisted; both friend lists and open remote DM updated');
  await pa.reload();await pa.waitForFunction(()=>root()?.querySelector('[data-key="blocked-toggle"]')?.textContent.includes('1'));
  assert.equal(await pa.evaluate(()=>root().querySelector('.sk-section').textContent),'Friends · 0');
@@ -85,20 +91,20 @@ try {
  await pa.evaluate(()=>{root().querySelector('[data-key="blocked-toggle"]').click();});
  await pa.waitForFunction(()=>root().querySelector('.sk-blocked-list button:not(:disabled)'));
  await pa.evaluate(()=>root().querySelector('.sk-blocked-list button').click());
- await pa.waitForFunction(()=>root().querySelector('[data-key="blocked-toggle"]').textContent.includes('0'));
+ await pa.waitForFunction(()=>!root().querySelector('[data-key="blocked-toggle"]'));
  assert.equal((await clients.A.listFriends()).friends.length,0);assert.equal((await clients.A.listBlocks()).blocks.length,0);
- await tab(pa,'Chat');await pa.waitForFunction(()=>!root().querySelector('.sk-chip'));
- await pa.reload();await pa.waitForFunction(()=>root()?.querySelector('[data-key="blocked-toggle"]')?.textContent.includes('0'));
+ await tab(pa,'Chat');await pa.waitForFunction(()=>!root().querySelector('.sk-convo, [data-conversation]'));
+ await pa.reload();await pa.waitForFunction(()=>root()?.textContent.includes('No friends or requests yet')&&!root().querySelector('[data-key="blocked-toggle"]'));
  assert.equal((await clients.A.listConversations()).conversations.some(c=>c.id===room.id),false);
  pass('shared Unblock persisted after reload without restoring friendship or DM membership');
  const again=await clients.A.sendFriendRequest({playerId:b.id});await clients.B.acceptFriendRequest(again.id);
  await wait(async()=> (await clients.A.listConversations()).conversations.some(c=>c.id===room.id));
- await tab(pa,'Chat');await pa.waitForFunction(body=>root().querySelector('.sk-chat')?.textContent.includes(body),body);
+ await tab(pa,'Chat');await openDm(pa,b.id);await pa.waitForFunction(body=>root().querySelector('.sk-chat')?.textContent.includes(body),body);
  pass('explicit re-friending restored the existing DM/history per backend contract');
  await tab(pa,'Friends');await pa.waitForFunction(()=>root().querySelector('.sk-friend-select:not(:disabled)'));
  await pa.evaluate(()=>{root().querySelector('.sk-friend-select .sk-avatar').click();[...root().querySelectorAll('.sk-member-panel button')].find(b=>b.textContent==='Remove friend').click();[...root().querySelectorAll('[role="alertdialog"] button')].find(b=>b.textContent==='Remove').click();});
  await pa.waitForFunction(()=>root().querySelector('.sk-section').textContent==='Friends · 0'&&!root().textContent.includes('Loading friends'));
- await pb.waitForFunction(()=>!root().querySelector('.sk-chip'));
+ await pb.waitForFunction(()=>!root().querySelector('.sk-convo, [data-conversation]'));
  assert.equal((await clients.A.listFriends()).friends.length,0);assert.equal((await clients.B.listFriends()).friends.length,0);
  pass('native Remove menu updates both friend lists/counts and removes the remote DM without manual refresh');
 } catch(error) {

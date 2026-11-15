@@ -1,6 +1,8 @@
 export function selectedChatKey(shadow,data,includeHidden=false) {
   if(!includeHidden&&shadow.querySelector('.sk-panel')?.hidden||!shadow.querySelector('[data-key="message"]'))return null;
   if(data.tab!=='chat')return data.tab==='clan'&&data.screen==='home'?'clan':null;
+  const conversation=shadow.querySelector('[data-conversation]')?.getAttribute('data-conversation');
+  if(conversation!==undefined&&conversation!==null)return Object.hasOwn(data.chatRooms??{},conversation)?conversation:null;
   const chips=[...shadow.querySelectorAll('.sk-chip')],index=chips.findIndex(el=>el.getAttribute('aria-pressed')==='true');
   return data.chatKeys?.[index]??null;
 }
