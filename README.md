@@ -413,8 +413,8 @@ then run `node test/live/badge.mjs`. It uses the real published configuration,
 creates one disposable player/clan, checks a non-default saved badge after
 reload, and leaves/disbands only that test clan. Google Fonts delivery is mocked;
 Platform/Social are real. No key/token is logged or shipped in the SDK.
-5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
-6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave is integrated as described below; kick/promote/demote remain disabled. Config cannot grant backend permissions.
+5. Members → `clanMembers(id)` plus a fresh `myClan` read; map `playerId/displayName/role` to shared rows. The viewer is matched only by the confirmed Social UUID from `getMyPlayer` (Friends enabled) or the Realtime hello, never guessed. Header role comes from `myClan`.
+6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave and member promote/demote/kick are integrated as described below. Config cannot grant backend permissions.
 
 The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
 
@@ -637,6 +637,47 @@ widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
 the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
 
 Verification and changed files: [TEAM-214 report](TEAM-214.md).
+
+## Clan member management (TEAM-257)
+
+```js
+await sdk.promoteClanMember(clanId, playerId); // 200 {playerId, displayName, role}
+await sdk.demoteClanMember(clanId, playerId);  // 200 {playerId, displayName, role}
+await sdk.kickClanMember(clanId, playerId);    // 204 → undefined
+```
+
+Bodyless `POST /api/v1/clans/{clanId}/members/{playerId}/promote|demote` and
+`DELETE /api/v1/clans/{clanId}/members/{playerId}`, Bearer player auth with the
+existing one-401 fresh-token retry. Both IDs are encoded; empty/dot IDs throw
+before any request. Errors retain status/code/message: 400 `cannot_kick_self`,
+403 `not_allowed`, 404 `clan_not_found`/`member_not_found`, 409
+`already_lowest_role`. No automatic retry.
+
+Social decides by the game's `clan.roles` (`canPromote`, `canKick`; the owner has
+every power). Promote/demote move one step; nobody is promoted to their own role
+or to owner. Without published roles only Kick exists (owner only) and promote
+answers 403. The shared Members panel offers only what the viewer's role allows,
+and the SDK maps its `setRole(target)` to the one Social step (a target that is
+not exactly one step away is ignored).
+
+The mounted panel shows Promoting/Demoting/Removing member…, allows one member
+action at a time, changes the roster only after a confirmed response, then
+re-reads members and `myClan`. Server rejections show their text and re-read
+state; network failures keep the last confirmed roster. Late responses after
+leave/kick/session reset/destroy are ignored. Events: `clan-sdk:member-role-changed`
+`{clanId,playerId,role}` and `clan-sdk:member-kicked` `{clanId,playerId}`.
+
+The kicked player receives Realtime `clan_kicked` and `conversation.removed`; an
+open widget returns to Discover and drops the clan room. Remaining members get no
+frame for role changes or kicks, so opening Members re-reads the roster and own
+role; no polling is added.
+
+The member panel's Add friend / Cancel use the Friends API (`sendFriendRequest`,
+`cancelFriendRequest`). Opening Members loads Friends state (when Friends is
+enabled) so each member shows its real relation; a member who already sent a
+request is accepted by sending one back, per Social.
+
+Verification and changed files: [TEAM-257 report](TEAM-257.md).
 
 ## Realtime clan chat (TEAM-226)
 

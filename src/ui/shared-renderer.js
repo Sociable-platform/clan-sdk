@@ -30,7 +30,10 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     const content = shadow.querySelector('.sk-content');
     if (!content) return;
     let status = content.querySelector('[data-sdk-status]');
-    let message = state.leavePending?'Leaving clan…':state.leaveError || state.error || state.joinError || '';
+    const busy={promote:'Promoting member…',demote:'Demoting member…',kick:'Removing member…'};
+    let message = state.leavePending?'Leaving clan…':state.memberPending?busy[state.memberPending.action]:state.leaveError || state.memberError || state.error || state.joinError || '';
+    // Members-panel Add friend / Cancel report through the Friends controller.
+    if (data.tab === 'clan' && data.screen === 'members' && !message) message = state.friends?.pending ? 'Updating friend request…' : state.friends?.actionError || '';
     if (data.tab === 'friends') {
       const friends=state.friends;
       message=friends?.error||friends?.actionError||friends?.searchError||'';
@@ -125,8 +128,12 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         button.disabled=Boolean(state.leavePending||state.profilePending||!data.clan);
         button.title=state.leavePending?'Leaving clan…':'';
       } else if (/^(Promote|Demote|Kick)/.test(label)) {
-        button.disabled = true;
-        button.title = 'Backend operation unavailable';
+        // @clan/ui offers only what the viewer's role allows; Social still decides.
+        button.disabled = Boolean(state.memberPending || state.profilePending || state.leavePending || !data.clan);
+        button.title = state.memberPending ? busy[state.memberPending.action] : '';
+      } else if (button.closest('.sk-member-panel') && /^(Add |Cancel friend request)/.test(label)) {
+        button.disabled = state.friends?.status !== 'ready' || Boolean(state.friends?.pending);
+        button.title = state.friends?.status === 'loading' ? 'Loading friends…' : '';
       }
     });
     if(data.tab==='friends')decorateFriends(shadow,data,labels);

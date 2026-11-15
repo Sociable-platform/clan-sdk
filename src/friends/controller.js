@@ -1,6 +1,7 @@
 import {friendPlayer,friendList,friendRequests,playerResults,blockedPlayers} from '../social/friends-adapter.js';
 
-export function createFriendsController({sdk,onChange,onMutation=()=>{},debounceMs=250}) {
+// clanPlayers: Social IDs of the confirmed clan roster, whose Members panel offers Add friend.
+export function createFriendsController({sdk,onChange,onMutation=()=>{},clanPlayers=()=>[],debounceMs=250}) {
   let dead=false,enabled=false,active=false,revision=0,searchRevision=0,timer;
   let mutation=null,refreshQueued=false,backgroundQueued=false;
   let state={status:'idle',player:null,friends:[],blocked:[],incoming:[],outgoing:[],query:'',players:[],searchStatus:'idle',error:'',searchError:'',actionError:'',pending:null};
@@ -61,7 +62,8 @@ export function createFriendsController({sdk,onChange,onMutation=()=>{},debounce
       if(!methods[action])return;
       // Only displayed, server-backed objects are actionable. Never substitute a
       // game's externalId for a Social UUID or a player ID for a request ID.
-      const displayed=action==='send'?state.players.some(p=>p.id===id&&p.relation==='none'&&id!==state.player.id)
+      const member=()=>id!==state.player.id&&clanPlayers().includes(id)&&!state.friends.some(p=>p.id===id)&&!state.blocked.some(p=>p.id===id)&&!state.outgoing.some(r=>r.playerId===id);
+      const displayed=action==='send'?state.players.some(p=>p.id===id&&p.relation==='none'&&id!==state.player.id)||member()
         :action==='remove'||action==='block'?id!==state.player.id&&(state.friends.some(p=>p.id===id)||state.players.some(p=>p.id===id&&p.relation==='friend'))
         :action==='unblock'?state.blocked.some(p=>p.id===id)||state.players.some(p=>p.id===id&&p.relation==='blocked')
         :action==='cancel'?state.outgoing.some(r=>r.id===id)||state.players.some(p=>p.requestId===id&&p.relation==='request_sent')
