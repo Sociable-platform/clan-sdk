@@ -43,12 +43,18 @@ export function init(options) {
       const query = q === undefined ? '' : `?${new URLSearchParams({ q })}`;
       return request(`/api/v1/clans${query}`);
     },
-    createClan({ name } = {}) {
+    createClan({ name, badge, description, tag } = {}) {
       if (typeof name !== 'string') {
         throw new TypeError('name must be a string.');
       }
       // Name length/uniqueness remain server rules; do not add UI validation here.
-      return request('/api/v1/clans', { method: 'POST', body: { name } });
+      const body={name};
+      for(const [field,value]of Object.entries({badge,description,tag})){
+        if(value===undefined)continue;
+        if(typeof value!=='string')throw new TypeError(`${field} must be a string.`);
+        body[field]=value;
+      }
+      return request('/api/v1/clans', { method: 'POST', body });
     },
     joinClan(clanId) {
       return request(`/api/v1/clans/${encodeClanId(clanId)}/join`, { method: 'POST' });

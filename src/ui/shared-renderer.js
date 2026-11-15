@@ -48,7 +48,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     else if (data.tab === 'chat' || data.screen === 'home') message = null;
     else if (state.profilePending || state.status === 'loading' && data.screen === 'discover') message ||= 'Loading clans…';
     else if (data.screen === 'discover' && state.status === 'empty') message ||= 'No clans found.';
-    if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : 'Only the clan name is supported by the current Social API.';
+    if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : '';
     // Child-list observation also catches the shared launcher's internal repaints.
     // Only write changed text; unconditional replaceChildren would loop forever.
     if (message!==null && status.firstChild?.textContent !== message) {
@@ -71,9 +71,10 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       button.title = 'Messaging unavailable';
     });
     if (data.tab !== 'friends' && data.screen === 'create') {
-      shadow.querySelectorAll('[data-key="tag"], [data-key="description"], [role="radio"]').forEach(control => {
-        control.disabled = true;
-        control.title = 'Not supported by the Social API';
+      const pending=Boolean(state.createPending||state.profilePending||!state.membershipKnown);
+      shadow.querySelectorAll('[data-key="tag"], [data-key="description"], [data-key="badge-trigger"], [role="radio"]').forEach(control => {
+        control.disabled = pending;
+        control.title = pending?'Please wait…':'';
       });
       if (state.createPending || state.profilePending || !state.membershipKnown) {
         shadow.querySelectorAll('.sk-actions button:not(.sk-btn-ghost)').forEach(button => { button.disabled = true; });
@@ -99,16 +100,16 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
           setText(button, state.pendingJoin === clan.id ? 'Joining…'
             : data.clan?.id === clan.id || state.joinedClanId === clan.id ? 'Joined' : full ? labels.full : labels.join);
         }
-        // The inspected Social DTO has no emblem; a configured badge is not data.
+        // Only a saved backend badge is a clan's selected badge.
         const badge = row.querySelector('.sk-badge');
-        if (badge) badge.hidden = true;
+        if (badge) badge.hidden = !clan.badge;
       });
     }
     if (data.clan) {
       const count = `${data.clan.memberCount}/${data.clan.maxMembers} members`;
       setText(shadow.querySelector('.sk-card-head .sk-label'), count);
       const badge = shadow.querySelector('.sk-card-head .sk-badge');
-      if (badge) badge.hidden = true;
+      if (badge) badge.hidden = !data.clan.badge;
       shadow.querySelectorAll('.sk-stat').forEach((stat, index) => {
         if (index === 0) setText(stat.querySelector('.sk-stat-value'), count);
         else stat.hidden = true; // No level/XP fields in Social's Clan DTO.

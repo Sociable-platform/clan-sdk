@@ -21,7 +21,7 @@ test('init exports five methods and makes no token or HTTP request', (t) => {
 
 const operations = [
   { name: 'listClans', call: sdk => sdk.listClans(), path: '/api/v1/clans', method: 'GET', result: socialContracts.list },
-  { name: 'createClan', call: sdk => sdk.createClan({ name: 'Dragons', tag: 'ignored' }), path: '/api/v1/clans', method: 'POST', body: '{"name":"Dragons"}', result: socialContracts.create, status: 201 },
+  { name: 'createClan', call: sdk => sdk.createClan({ name: 'Dragons' }), path: '/api/v1/clans', method: 'POST', body: '{"name":"Dragons"}', result: socialContracts.create, status: 201 },
   { name: 'joinClan', call: sdk => sdk.joinClan(socialContracts.join.id), path: `/api/v1/clans/${socialContracts.join.id}/join`, method: 'POST', result: socialContracts.join },
   { name: 'myClan', call: sdk => sdk.myClan(), path: '/api/v1/players/me/clan', method: 'GET', result: socialContracts.mine },
   { name: 'clanMembers', call: sdk => sdk.clanMembers(socialContracts.join.id), path: `/api/v1/clans/${socialContracts.join.id}/members`, method: 'GET', result: socialContracts.members },

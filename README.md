@@ -404,7 +404,15 @@ Live runtime flow:
 1. If clan is enabled, call `myClan()`. Only `404 not_in_clan` means no membership; other errors are visible with Retry.
 2. No clan → Discover → `listClans({q})`. Search is debounced 250 ms; stale results cannot replace newer searches. Server errors, loading, empty and retry are shown. Capacity comes from each response's `memberCount/maxMembers`, never from config. No runtime emblem, tag or description is fabricated.
 3. Join → `joinClan(id)` once while pending → `clan-sdk:joined` → re-read `myClan()` → real Home data. No optimistic fake membership.
-4. Create uses the supplied shared form and **only `{name}`** with `createClan`. Badge/tag/description controls are disabled in live mode because the backend doesn't accept them. Duplicate writes are guarded. Server errors remain visible; success refreshes membership.
+4. Create uses the supplied shared form and `createClan({name, badge?, description?, tag?})`. The badge picker offers the published allowed IDs and sends the selected ID, not its image. Description and the optional configured tag are saved through the same Social contract. No allowed badges means the nullable UI selection is omitted from the request. Duplicate writes are guarded; pending requests disable badge/details controls. Server errors retain the form for retry; success refreshes membership. Saved badges/details are mapped from backend responses and remain visible after reload and in Discover. Missing badge fields do not invent a saved selection.
+
+For an opt-in local-service badge/reload check, build first, set
+`LIVE_BADGE_DEV_KEY` to an external development signing-key path and
+`LIVE_BADGE_GAME_ID` to a configured development game with at least two badges,
+then run `node test/live/badge.mjs`. It uses the real published configuration,
+creates one disposable player/clan, checks a non-default saved badge after
+reload, and leaves/disbands only that test clan. Google Fonts delivery is mocked;
+Platform/Social are real. No key/token is logged or shipped in the SDK.
 5. Members → `clanMembers(id)`; map `playerId/displayName/role` to shared rows. Current Social UUID is not available in these membership responses, so no guessed `(you)` marker. Header role comes from `myClan`.
 6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave is integrated as described below; kick/promote/demote remain disabled. Config cannot grant backend permissions.
 
