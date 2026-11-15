@@ -13,8 +13,26 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
   const fonts = widgetFonts(doc);
   const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
 
+  // The shared UI pins the message list to its newest message on repaint. SDK
+  // decoration runs after that; keep its status line from shrinking the list
+  // underneath (an empty flex item still adds .sk-content's 10px gap) and re-pin
+  // a list that was at its end. A reader who scrolled up is left where they are.
   function decorate() {
     if (destroyed || !live || !shadow) return;
+    const chat=shadow.querySelector('[data-key="chat"]');
+    const pinned=chat&&chat.scrollHeight-chat.scrollTop-chat.clientHeight<24;
+    decorateNow();
+    const status=shadow.querySelector('[data-sdk-status]');
+    if(status){
+      const empty=!status.textContent.trim()&&!status.querySelector('button');
+      // Out of flow, not display:none, so the polite live region stays announced.
+      const style=empty?'position:absolute;top:0;left:0;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap':'';
+      if(status.style.cssText!==style)status.style.cssText=style;
+    }
+    const next=shadow.querySelector('[data-key="chat"]');
+    if(pinned&&next&&next.scrollHeight-next.scrollTop-next.clientHeight>0)next.scrollTop=next.scrollHeight;
+  }
+  function decorateNow() {
     const composer=shadow.querySelector('[data-key="message"]');
     if(purgeDraft&&composer){purgeDraft=false;composer.value='';composer.dispatchEvent(new doc.defaultView.Event('input',{bubbles:true}));}
     const state = data.sdkState ?? {};
