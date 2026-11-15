@@ -28,7 +28,12 @@ export async function checkBundle(api) {
     assert(style.backgroundColor==='rgb(18, 52, 86)'&&style.borderTopWidth==='1px','Bundled theme CSS not applied');
     const rooms=await sdk.listConversations();
     assert(tokens>0&&Array.isArray(rooms.conversations),'Player token/realtimeUrl not preserved');
-    assert(!document.querySelector('link[rel="stylesheet"]'),'Bundle needs an external stylesheet');
+    const fonts=[...document.querySelectorAll('link[rel="stylesheet"]')];
+    assert(fonts.length===1&&fonts[0].hasAttribute('data-clan-sdk-fonts'),'Unexpected external UI stylesheet');
+    const fontUrl=new URL(fonts[0].href);
+    assert(fontUrl.origin==='https://fonts.googleapis.com'&&fontUrl.searchParams.getAll('family').join(',')==='Bangers:wght@400;500;600,Silkscreen:wght@400;500;600','Published font families were not loaded');
+    const headingFont=getComputedStyle(root.querySelector('.sk-title')).fontFamily,bodyFont=getComputedStyle(root.querySelector('.sk-panel')).fontFamily;
+    assert(headingFont.includes('Bangers')&&bodyFont.includes('Silkscreen'),`Published font families not applied: heading=${headingFont}, body=${bodyFont}`);
     window.bundleResult={version:api.version,exports:Object.keys(api).sort(),tokens,background:style.backgroundColor,width:box.width,height:box.height};
     summary.textContent='PASS: styled panel, public API, token callback and service URLs (mocked services)';
     summary.dataset.result='passed';
