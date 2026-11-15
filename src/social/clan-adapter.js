@@ -14,7 +14,11 @@ export function socialClanAdapter(response) {
       || !Number.isSafeInteger(clan.maxMembers) || clan.maxMembers <= 0) {
       throw new TypeError(`Invalid Social clan at clans[${index}]: expected id, name, memberCount and maxMembers.`);
     }
-    // No emblem or per-clan availability field exists in the inspected DTO.
-    return { id:clan.id, name:clan.name, memberCount:clan.memberCount, maxMembers:clan.maxMembers };
+    const details={};
+    for(const field of ['badge','description','tag'])if(clan[field]!==undefined){
+      if(typeof clan[field]!=='string')throw new TypeError(`Invalid Social clan at clans[${index}].${field}: expected string.`);
+      details[field]=clan[field];
+    }
+    return { id:clan.id, name:clan.name, memberCount:clan.memberCount, maxMembers:clan.maxMembers,...details };
   });
 }

@@ -124,12 +124,12 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       list.navigate(tab === 'clan' && state.screen === 'discover' ? 'discover' : 'create');
       emit(); onEvent('tab',{tab});
     },
-    async create({name}) {
+    async create({name,badge,description,tag}) {
       if (dead || !enabled || !state.membershipKnown || state.createPending || state.clan) return;
       const currentVisit = visit;
       state = {...state, createPending:true, error:''}; emit();
       try {
-        const clan = await sdk.createClan({name}); // No badge/tag/description wire fields exist.
+        const clan = await sdk.createClan({name,...(badge==null?{}:{badge}),...(description===undefined?{}:{description}),...(tag===undefined?{}:{tag})});
         if (dead || currentVisit !== visit) return;
         onEvent('created',{clanId:clan.id}); await membership('home');
       } catch (error) { if (!dead && currentVisit === visit) fail(error); }
