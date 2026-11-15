@@ -8,14 +8,27 @@ export function conversationDTO(c) {
   return {...c,members:c.members.map(m=>{if(!string(m.id)||typeof m.name!=='string'||typeof m.online!=='boolean')throw new Error('Invalid Realtime member.');return {...m};})};
 }
 const fault=(message,code='chat_unavailable')=>Object.assign(new Error(message),{code});
+// The Send button counts down the wait only when the game's slow mode is this long or longer (seconds).
+// A shorter wait is over about as fast as a number can be read, so the button is just disabled.
+export const COUNTDOWN_FROM_SECONDS=4;
+// The server's fixed wait after a rate_limited rejection; long enough to always show the countdown.
+const RATE_LIMIT_WAIT_MS=5000;
 export function createChatController({client,onChange,onNotification=()=>{},onReconnect=()=>{},onMembership=()=>{},onSuspend=()=>{},onConfig=()=>{},isVisible=()=>true,socketFactory=url=>new WebSocket(url),random=Math.random,now=Date.now,ackTimeout=10000,handshakeTimeout=10000}) {
   let dead=false,enabled=false,config={},clanId=null,socket,epoch=0,attempt=0,authTried=false,forceNext=false;
   let reconnectTimer,helloTimer,stableTimer,cooldownTimer,sequence=0,listRevision=0,selectedKey=null,rejectedVersion;
-  let state={status:client?'idle':'unavailable',playerId:null,gameId:null,conversations:[],messages:{},history:{},error:'',pending:null,cooldownUntil:0};
+  let state={status:client?'idle':'unavailable',playerId:null,gameId:null,conversations:[],messages:{},history:{},error:'',pending:null,cooldownUntil:0,cooldownCountdown:false};
   const pending=new Map(),loading=new Map(),recoveryAnchors=new Map(),roomRevisions=new Map(),revokedClans=new Set(),revokedRooms=new Map(),readPositions=new Map(),knownRooms=new Map();
   let suspended=false;
   let connectedBefore=false,blockedPeers=new Set();
   const emit=()=>{if(!dead)onChange({...state});};
+  // The game's slow mode from the published config. The server enforces it (per player, across all chats);
+  // the SDK mirrors it so Send is disabled for the wait instead of sending a message that will be refused.
+  const slowModeSeconds=()=>{const s=config.chat?.slowModeSeconds;return Number.isFinite(s)&&s>0?s:0;};
+  function startCooldown(ms,countdown){
+    if(!(ms>0))return;
+    state={...state,cooldownUntil:now()+ms,cooldownCountdown:countdown};clearTimeout(cooldownTimer);
+    cooldownTimer=setTimeout(()=>{state={...state,cooldownUntil:0,cooldownCountdown:false};emit();},ms);
+  }
   const valid=ticket=>!dead&&enabled&&ticket===epoch;
   const peerBlocked=c=>c.kind==='dm'&&c.members.some(p=>blockedPeers.has(p.id));
   const allowed=c=>config.chat?.enabled===true&&!peerBlocked(c)&&(c.kind==='dm'?config.chat.directMessages===true:config.chat.clanChat===true&&config.clan?.enabled===true&&c.clanId===clanId);
@@ -150,17 +163,24 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
             state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message}:c)};read();emit();
           }else if(frame.type==='message.ack'){
             const item=pending.get(d.replyTo);if(!item||typeof d.messageId!=='string')return;
-            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:''};emit();item.resolve(d);void history(item.conversationId,{recover:true});
+            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:''};
+            // The message was accepted, so the player's slow mode wait starts now.
+            startCooldown(slowModeSeconds()*1000,slowModeSeconds()>=COUNTDOWN_FROM_SECONDS);
+            emit();item.resolve(d);void history(item.conversationId,{recover:true});
           }else if(frame.type==='error'){
             if(d.code==='bad_frame')try{console.warn('[clan-sdk] Realtime rejected a client frame: bad_frame.');}catch{}
             const item=pending.get(d.replyTo);if(!item)return;
-            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:typeof d.message==='string'?d.message:'Message rejected.'};
-            if(d.code==='slow_mode'||d.code==='rate_limited'){
-              const ms=d.code==='rate_limited'?5000:Number.isFinite(d.retryAfterMs)?Math.max(0,d.retryAfterMs):1000;
-              state={...state,cooldownUntil:now()+ms};clearTimeout(cooldownTimer);cooldownTimer=setTimeout(()=>{state={...state,cooldownUntil:0};emit();},ms);
+            // A cooldown (slow mode, rate limit) is the rules working, not an error: Send stays disabled until it
+            // ends and nothing else is shown, so no error text and no Retry button. The draft stays in the box.
+            const rejected=typeof d.message==='string'?d.message:'Message rejected.',cooldown=d.code==='slow_mode'||d.code==='rate_limited';
+            clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:cooldown?'':rejected};
+            if(cooldown){
+              // The server's own number wins over the wait the SDK started by itself.
+              if(d.code==='rate_limited')startCooldown(RATE_LIMIT_WAIT_MS,true);
+              else startCooldown(Number.isFinite(d.retryAfterMs)?Math.max(0,d.retryAfterMs):1000,slowModeSeconds()>=COUNTDOWN_FROM_SECONDS);
             }
             if(['not_member','feature_disabled','blocked'].includes(d.code)){state={...state,blocked:{...state.blocked,[item.conversationId]:d.code}};if(d.code==='not_member'){remove(item.conversationId);void refresh();}}
-            emit();item.reject(fault(state.error,d.code));
+            emit();item.reject(fault(rejected,d.code));
           }else if(frame.type==='conversation.added'||frame.type==='conversation.removed'){
             if(frame.type==='conversation.added'&&state.conversations.some(c=>c.id===d.conversation?.id))return;
             listRevision++;if(frame.type==='conversation.removed'){

@@ -1,0 +1,6 @@
+# The Oracle server (the same cluster and domain as clan-backend's values-prod.yaml).
+ingress:
+  domain: 130-61-158-79.sslip.io
+  tls:
+    enabled: true
+    clusterIssuer: clan-letsencrypt
