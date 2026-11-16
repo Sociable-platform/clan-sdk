@@ -2,7 +2,7 @@
 // Identities and data are synthetic.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createChatController} from '../src/chat/controller.js';
+import {createChatController, messageDTO} from '../src/chat/controller.js';
 import {chatView} from '../src/chat/view.js';
 import {selectedChatKey} from '../src/ui/chat-controls.js';
 
@@ -122,9 +122,61 @@ test('until a conversation\'s history is loaded, its thread is the last message 
   const last={id:'last',senderId:'peer',senderName:'Peer',body:'see you',createdAt:'2026-11-15T10:00:00Z'};
   const state={playerId:'me',messages:{},conversations:[{...dm,lastMessage:last,unread:1},{...clan,lastMessage:{...last,id:'c-last',senderId:'me'}}]};
   const view=chatView(state,config,{id:'social-clan'});
-  assert.deepEqual(view.threads.peer,[{id:'last',from:'Peer',body:'see you',mine:false,at:last.createdAt}]);
+  assert.deepEqual(view.threads.peer,[{id:'last',from:'Peer',body:'see you',mine:false,at:last.createdAt,kind:'text'}]);
   assert.equal(view.threads.clan[0].mine,true);
   // Loaded history replaces it; an invalid last message is left out.
   assert.deepEqual(chatView({...state,messages:{[dm.id]:[{...last,id:'h1',body:'from history'}]}},config,{id:'social-clan'}).threads.peer.map(m=>m.id),['h1']);
   assert.deepEqual(chatView({...state,conversations:[{...dm,lastMessage:{id:'x'}}]},config,{id:'social-clan'}).threads.peer,[]);
+});
+
+// Clan member changes (TEAM-292): Realtime sends "Ali joined the clan" as a message with a kind, the player it is
+// about as the sender and an empty body. @clan/ui draws it as a line; it never counts as unread.
+const member=(id,kind,senderId='peer')=>({...msg(id,senderId),body:'',kind});
+
+test('messageDTO keeps the kind, and a message without one is text (a Realtime from before kinds)',()=>{
+  const m=msg('m1');
+  assert.equal(messageDTO(m).kind,'text');
+  assert.equal(messageDTO({...m,kind:'text'}).kind,'text');
+  assert.equal(messageDTO(member('j1','member_joined')).kind,'member_joined');
+  assert.equal(messageDTO({...m,kind:null}).kind,'text');
+  // A kind this SDK does not know yet is kept, for @clan/ui to decide; a kind that is not a word is invalid.
+  assert.equal(messageDTO({...m,kind:'member_promoted'}).kind,'member_promoted');
+  assert.throws(()=>messageDTO({...m,kind:''}),/Invalid Realtime message/);
+  assert.throws(()=>messageDTO({...m,kind:7}),/Invalid Realtime message/);
+});
+
+test('the view gives every message its kind, in history and as the conversation list\'s last message',async t=>{
+  const w=await world(t,{history:{[clan.id]:[msg('hi'),member('j1','member_joined')]}});
+  w.c.select('clan');await settle();
+  const view=chatView(w.state(),config,{id:'social-clan'});
+  assert.deepEqual(view.threads.clan.map(m=>[m.id,m.kind,m.from,m.body]),[['hi','text','Peer','hi'],['j1','member_joined','Peer','']]);
+  const listed=chatView({playerId:'me',messages:{},conversations:[{...clan,lastMessage:member('l1','member_left')}]},config,{id:'social-clan'});
+  assert.deepEqual(listed.threads.clan.map(m=>[m.kind,m.from]),[['member_left','Peer']]);
+});
+
+test('a member change is the conversation\'s newest message but never unread',async t=>{
+  const w=await world(t);
+  for(const [id,kind] of [['j1','member_joined'],['l1','member_left'],['k1','member_kicked']])
+    w.socket.frame('message.new',{conversationId:clan.id,message:member(id,kind)});
+  assert.deepEqual(w.unread(),{clan:3,direct:{peer:2}});
+  assert.equal(w.state().conversations.find(c=>c.id===clan.id).lastMessage.id,'k1');
+  assert.equal(w.reads().length,0);
+  // A message a player writes after it counts as before.
+  w.socket.frame('message.new',{conversationId:clan.id,message:msg('c1')});
+  assert.equal(w.unread().clan,4);
+});
+
+test('the player\'s own join line is not a reply: it keeps the count and sends no read',async t=>{
+  const w=await world(t,{visible:()=>false});
+  w.socket.frame('message.new',{conversationId:clan.id,message:member('j-me','member_joined','me')});
+  assert.equal(w.unread().clan,3);
+  assert.equal(w.reads().length,0);
+});
+
+test('an open clan chat on screen is still read up to its newest message, a member change included',async t=>{
+  const w=await world(t,{history:{[clan.id]:[msg('hi')]}});
+  w.c.select('clan');await settle();
+  w.socket.frame('message.new',{conversationId:clan.id,message:member('j1','member_joined')});
+  assert.deepEqual(w.reads().at(-1).data,{conversationId:clan.id,lastMessageId:'j1'});
+  assert.equal(w.unread().clan,0);
 });
