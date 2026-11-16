@@ -1,8 +1,10 @@
 export function selectedChatKey(shadow,data,includeHidden=false) {
   if(!includeHidden&&shadow.querySelector('.sk-panel')?.hidden||!shadow.querySelector('[data-key="message"]'))return null;
   if(data.tab!=='chat')return data.tab==='clan'&&data.screen==='home'?'clan':null;
+  // @clan/ui 0.1.49+: the open conversation's header carries its key (a friend's ID).
   const conversation=shadow.querySelector('[data-conversation]')?.getAttribute('data-conversation');
   if(conversation!==undefined&&conversation!==null)return Object.hasOwn(data.chatRooms??{},conversation)?conversation:null;
+  // Older @clan/ui: one chip per conversation above it, the pressed one is open.
   const chips=[...shadow.querySelectorAll('.sk-chip')],index=chips.findIndex(el=>el.getAttribute('aria-pressed')==='true');
   return data.chatKeys?.[index]??null;
 }

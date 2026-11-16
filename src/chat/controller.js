@@ -84,11 +84,15 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
     });
     loading.set(id,task);try{await task;}finally{if(loading.get(id)===task)loading.delete(id);}
   }
-  function read() {
-    const current=room(selectedKey),last=current&&state.messages[current.id]?.at(-1);
+  // Tells the server the player read the conversation up to its newest message, when it is on screen, and drops its
+  // unread count to 0 (the server does the same; it does not tell this tab). Returns whether the count changed.
+  function read(key=selectedKey) {
+    const current=room(key),last=current&&state.messages[current.id]?.at(-1);
     if(last&&isVisible()&&readPositions.get(current.id)!==last.id&&socket?.readyState===1&&state.status==='connected'){
-      try{socket.send(JSON.stringify({type:'conversation.read',data:{conversationId:current.id,lastMessageId:last.id}}));readPositions.set(current.id,last.id);}catch{} // A close can race the read; never fail the host page.
+      try{socket.send(JSON.stringify({type:'conversation.read',data:{conversationId:current.id,lastMessageId:last.id}}));readPositions.set(current.id,last.id);}catch{return false;} // A close can race the read; never fail the host page.
+      if(current.unread>0){state={...state,conversations:state.conversations.map(c=>c.id===current.id?{...c,unread:0}:c)};return true;}
     }
+    return false;
   }
   function remove(id) {
     knownRooms.delete(id);
@@ -160,7 +164,9 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
           if(frame.type==='message.new'){
             if(!state.conversations.some(c=>c.id===d.conversationId&&allowed(c)))return;
             const message=messageDTO(d.message);merge(d.conversationId,[message]);
-            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message}:c)};read();emit();
+            // Another player's message is unread until read() below finds the conversation open and on screen (99 at most, like the server).
+            const fromOther=message.senderId!==state.playerId;
+            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:fromOther?Math.min(99,(c.unread??0)+1):c.unread}:c)};read();emit();
           }else if(frame.type==='message.ack'){
             const item=pending.get(d.replyTo);if(!item||typeof d.messageId!=='string')return;
             clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:''};
@@ -248,7 +254,8 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
     },
     select(key) {const changed=selectedKey!==key;selectedKey=key;const current=room(key);if(current&&(changed||!state.history[current.id]?.loaded&&!state.history[current.id]?.error))void history(current.id);},
     resolve:key=>room(key),
-    markRead:read,
+    // The panel shows a conversation ('clan' or a friend's ID; the selected one when left out): mark it read.
+    markRead(key){if(dead)return;if(read(key??selectedKey))emit();},
     refresh,
     loadEarlier(){const current=room(selectedKey);if(current)return history(current.id,{older:true});},
     reconnect(){if(dead||suspended||!enabled)return;stop();attempt=0;authTried=false;state={...state,blocked:{}};void connect();},
