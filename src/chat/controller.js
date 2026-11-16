@@ -5,7 +5,10 @@ export function messageDTO(m) {
   // (senderId and senderName are the player it is about, the body is empty). A Realtime without kinds sends only text.
   const kind=m.kind==null?'text':m.kind;
   if(!string(kind))throw new Error('Invalid Realtime message.');
-  return {id:m.id,senderId:m.senderId,senderName:m.senderName,body:m.body,createdAt:m.createdAt,kind};
+  // kickedBy: only on a 'member_kicked' message, who removed the player ({id,name}). It only adds to the sentence, so a
+  // Realtime without it, or one we cannot read, leaves it out; the message is still a kick.
+  const by=m.kickedBy,kickedBy=kind==='member_kicked'&&by&&string(by.id)&&string(by.name)?{id:by.id,name:by.name}:null;
+  return {id:m.id,senderId:m.senderId,senderName:m.senderName,body:m.body,createdAt:m.createdAt,kind,...(kickedBy&&{kickedBy})};
 }
 /** Whether a message is something a player wrote, not a clan member change; only those count as unread. */
 export const isText=message=>message.kind==='text';

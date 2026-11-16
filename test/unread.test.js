@@ -154,6 +154,44 @@ test('the view gives every message its kind, in history and as the conversation 
   assert.deepEqual(listed.threads.clan.map(m=>[m.kind,m.from]),[['member_left','Peer']]);
 });
 
+// A kick says who removed the player (kickedBy: {id,name}, only on member_kicked): the widget writes "Dan was removed by Ali".
+const boss={id:'boss',name:'Boss'};
+const kick=(id='k1',by=boss)=>({...member(id,'member_kicked'),kickedBy:by});
+const plainKick=id=>member(id,'member_kicked'); // a kick whose event did not say who
+
+test('messageDTO keeps who removed the player on a member_kicked message, and only there',()=>{
+  assert.deepEqual(messageDTO(kick()).kickedBy,boss);
+  // Only the id and the name are passed on.
+  assert.deepEqual(messageDTO(kick('k2',{...boss,rank:1})).kickedBy,boss);
+  // Not a kick, no kickedBy, or one that cannot be read: left out, and the message is still valid.
+  for(const m of [{...msg('t1'),kickedBy:boss},{...member('j1','member_joined'),kickedBy:boss},{...member('l1','member_left'),kickedBy:boss},
+    plainKick('k3'),kick('k4',null),kick('k5',{id:'boss'}),kick('k6',{id:'',name:'Boss'}),kick('k7',{id:'boss',name:7}),kick('k8','Boss')]){
+    const dto=messageDTO(m);
+    assert.equal('kickedBy' in dto,false,JSON.stringify(m));
+  }
+  assert.equal(messageDTO(plainKick('k9')).kind,'member_kicked');
+});
+
+test('the view gives a kick `by`: who removed the player, in history and as the last message; no other message has it',async t=>{
+  const w=await world(t,{history:{[clan.id]:[msg('hi'),member('l1','member_left'),kick('k1'),plainKick('k2')]}});
+  w.c.select('clan');await settle();
+  const view=chatView(w.state(),config,{id:'social-clan'});
+  assert.deepEqual(view.threads.clan.map(m=>[m.id,m.kind,m.from,m.by]),
+    [['hi','text','Peer',undefined],['l1','member_left','Peer',undefined],['k1','member_kicked','Peer','Boss'],['k2','member_kicked','Peer',undefined]]);
+  assert.deepEqual(view.threads.clan.filter(m=>'by' in m).map(m=>m.id),['k1']);
+  const listed=chatView({playerId:'me',messages:{},conversations:[{...clan,lastMessage:kick('k3')}]},config,{id:'social-clan'});
+  assert.deepEqual(listed.threads.clan.map(m=>[m.kind,m.from,m.by]),[['member_kicked','Peer','Boss']]);
+});
+
+test('a live kick keeps who removed the player on the conversation\'s last message, and is still never unread',async t=>{
+  const w=await world(t);
+  w.socket.frame('message.new',{conversationId:clan.id,message:kick('k1')});
+  assert.deepEqual(w.state().conversations.find(c=>c.id===clan.id).lastMessage.kickedBy,boss);
+  assert.equal(chatView(w.state(),config,{id:'social-clan'}).threads.clan.at(-1).by,'Boss');
+  assert.deepEqual(w.unread(),{clan:3,direct:{peer:2}});
+  assert.equal(w.reads().length,0);
+});
+
 test('a member change is the conversation\'s newest message but never unread',async t=>{
   const w=await world(t);
   for(const [id,kind] of [['j1','member_joined'],['l1','member_left'],['k1','member_kicked']])
