@@ -46,10 +46,12 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     // (it adds up each friend's direct messages). Realtime knows who is online only for DM partners (the conversation
     // list, then presence.update), so a friend gets `online` from their DM; a friend without one gets no dot.
     // On the Clan tab before Friends has loaded, the DM partners stand in (they are all friends), so the count shows.
-    const online=new Map(view.peers.map(p=>[p.id,p.online]));
+    // Read-only DMs (a block ended the friendship) are not friends: no online state, and not stand-ins on the Clan tab.
+    const friendPeers=view.peers.filter(p=>!p.readOnly);
+    const online=new Map(friendPeers.map(p=>[p.id,p.online]));
     const withOnline=list=>list.map(p=>online.has(p.id)&&typeof online.get(p.id)==='boolean'?{...p,online:online.get(p.id)}:p);
     const friendList=()=>state?.tab==='chat'?view.peers:searching?withOnline(friendState.players)
-      :friendState?.status==='ready'?withOnline(friendState.friends):state?.tab==='clan'?view.peers:withOnline(friendState?.friends??[]);
+      :friendState?.status==='ready'?withOnline(friendState.friends):state?.tab==='clan'?friendPeers:withOnline(friendState?.friends??[]);
     // Members-panel friend offer: only confirmed Friends state says what a member is to the viewer.
     const relation=member=>{
       if(friendState?.status!=='ready')return member;
@@ -79,7 +81,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
-    friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.forgetPeer(id);}});
+    friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.endFriendship(id);}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{
       state=next;render();if(live){friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state.clan?.id);}
     },onEvent:notify});

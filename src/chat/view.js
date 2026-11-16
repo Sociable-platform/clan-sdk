@@ -12,7 +12,11 @@ export function chatView(state,config,clan) {
     const loaded=state.messages[room.id]??[];
     const messages=loaded.length?loaded.map(map):preview(room);
     if(room.kind==='clan'){threads.clan=messages;rooms.clan=room.id;unread.clan=count(room);}
-    else{const other=room.members.find(m=>m.id!==state.playerId);if(other){peers.push({id:other.id,name:other.name,online:other.online,relation:'friend'});threads[other.id]=messages;rooms[other.id]=room.id;if(count(room))unread.direct[other.id]=count(room);}}
+    else{const other=room.members.find(m=>m.id!==state.playerId);if(other){
+      // A read-only DM (a block ended the friendship): still listed and readable, not a friend, no online dot.
+      const blocked=(state.blockedPeers??[]).includes(other.id),readOnly=room.readOnly===true||blocked;
+      peers.push(readOnly?{id:other.id,name:other.name,relation:blocked?'blocked':'none',readOnly:true,blockedByMe:blocked}:{id:other.id,name:other.name,online:other.online,relation:'friend'});
+      threads[other.id]=messages;rooms[other.id]=room.id;if(count(room))unread.direct[other.id]=count(room);}}
   }
   return {peers,threads,messages:threads.clan??[],rooms,unread,keys:[...peers.map(p=>p.id),...(config.chat?.clanChat===true&&config.clan?.enabled===true&&clan?['clan']:[])]};
 }

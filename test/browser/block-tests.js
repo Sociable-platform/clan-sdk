@@ -25,7 +25,8 @@ export function registerBlockTests({test,assert,container}) {
    if(path.endsWith('/friends'))return json({friends:store.friends});
    if(path.endsWith('/friends/requests'))return json({incoming:[],outgoing:[]});
    if(path.endsWith('/block')){
-    if(options.method==='POST'){store.friends=[];store.blocks=[friend];store.rooms=[];}
+    // Realtime keeps the DM of a block, read-only (TEAM-283).
+    if(options.method==='POST'){store.friends=[];store.blocks=[friend];store.rooms=store.rooms.map(r=>({...r,readOnly:true}));}
     else store.blocks=[];
     return new Response(null,{status:204});
    }
@@ -76,18 +77,51 @@ export function registerBlockTests({test,assert,container}) {
    assert(!sharedRoot(target),'Late block recreated UI');
   },(path,options)=>path.endsWith('/block')&&options.method==='POST'?pending.promise:undefined);
  });
- test('blocking clears an open DM/draft, ignores stale room events, and Unblock does not reopen it',()=>fixture(async({mount,sockets,clickBlock})=>{
+ test('blocking keeps the DM in Chat, readable and read-only, also after Unblock until friends again (TEAM-284)',()=>fixture(async({mount,sockets,clickBlock})=>{
   const wait=async(label,predicate)=>{try{await waitFor(predicate);}catch{throw new Error(`${label}: ${root.querySelector('.sk-content')?.textContent}`);}};
-  const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
-  const tab=name=>[...root.querySelectorAll('.sk-tab')].find(b=>b.textContent===name).click();
-  tab('Chat');await openDm(root);await wait('open DM',()=>root.textContent.includes('Existing direct message'));type(root,'message','Private unsent draft');
+  const {root}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
+  const tab=name=>[...root.querySelectorAll('.sk-tab')].find(b=>b.textContent.startsWith(name)).click();
+  const composer=()=>({input:root.querySelector('[data-key="message"]'),send:root.querySelector('.sk-composer button'),status:root.querySelector('[data-sdk-status]')?.textContent??''});
+  tab('Chat');await openDm(root);await wait('open DM',()=>root.textContent.includes('Existing direct message'));
   tab('Friends');await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));clickBlock(root);
-  await wait('block completion',()=>root.querySelector('[data-key="blocked-toggle"]')?.textContent.includes('1'));tab('Chat');
-  assert(!root.querySelector('.sk-convo, [data-conversation]')&&!root.querySelector('[data-key="message"]'),'Blocked DM remained open');
-  sockets[0].frame('conversation.added',{conversation:room});await sleep(20);assert(!root.querySelector('.sk-convo, [data-conversation]'),'Stale event restored blocked DM');
+  await wait('block completion',()=>root.querySelector('[data-key="blocked-toggle"]')?.textContent.includes('1'));
+  // The blocker: still in the Chat list, opens with its history, nothing can be written.
+  tab('Chat');await wait('blocked DM listed',()=>root.querySelector(`[data-key="convo-${friend.id}"]`)||root.querySelector('[data-conversation]'));
+  if(!root.querySelector('[data-conversation]'))await openDm(root,friend.id);
+  await wait('history readable',()=>root.textContent.includes('Existing direct message'));
+  await wait('read-only box',()=>composer().input?.disabled&&composer().send?.disabled&&composer().status.includes('You can only message friends'));
+  assert(!root.querySelector(`[data-conversation] .sk-presence`),'Read-only DM shows an online dot');
+  // Realtime's update arrives; Unblock alone does not make them friends: still read-only, with the friends-only reason.
+  sockets[0].frame('conversation.updated',{conversation:{...room,readOnly:true}});
   tab('Friends');await waitFor(()=>!root.textContent.includes('Loading friends'));root.querySelector('[data-key="blocked-toggle"]').click();root.querySelector('.sk-blocked-list button').click();
-  await wait('unblock completion',()=>!root.querySelector('[data-key="blocked-toggle"]'));tab('Chat');assert(!root.querySelector('.sk-convo, [data-conversation]'),'Unblock restored DM membership');
+  await wait('unblock completion',()=>!root.querySelector('[data-key="blocked-toggle"]'));
+  tab('Chat');await wait('still listed',()=>root.querySelector(`[data-key="convo-${friend.id}"]`)||root.querySelector('[data-conversation]'));
+  if(!root.querySelector('[data-conversation]'))await openDm(root,friend.id);
+  await wait('still read-only',()=>composer().input?.disabled&&composer().status.includes('You can only message friends'));
+  // Friends again: the same conversation comes back without readOnly and can be written in.
+  sockets[0].frame('conversation.added',{conversation:room});
+  await wait('writable again',()=>composer().input&&!composer().input.disabled&&!composer().status.includes('only message friends'));
+  type(root,'message','hello again');await wait('send enabled',()=>!composer().send.disabled);
  },undefined,{chat:true}));
+ test('Remove friend keeps the DM for both, readable and read-only, with the friends-only reason (TEAM-284)',()=>fixture(async({mount,sockets,store})=>{
+  const wait=async(label,predicate)=>{try{await waitFor(predicate);}catch{throw new Error(`${label}: ${root.querySelector('.sk-content')?.textContent}`);}};
+  const {root}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
+  const tab=name=>[...root.querySelectorAll('.sk-tab')].find(b=>b.textContent.startsWith(name)).click();
+  const composer=()=>({input:root.querySelector('[data-key="message"]'),send:root.querySelector('.sk-composer button'),status:root.querySelector('[data-sdk-status]')?.textContent??''});
+  root.querySelector('.sk-friend-select').click();[...root.querySelectorAll('.sk-member-panel button')].find(b=>b.textContent==='Remove friend').click();
+  const confirm=[...root.querySelectorAll('[role="alertdialog"] button')].find(b=>b.textContent==='Remove');confirm.click();
+  await wait('removal completion',()=>root.querySelector('.sk-section')?.textContent==='Friends · 0');
+  tab('Chat');await wait('DM still listed',()=>root.querySelector(`[data-key="convo-${friend.id}"]`));await openDm(root,friend.id);
+  await wait('history readable',()=>root.textContent.includes('Existing direct message'));
+  await wait('read-only box',()=>composer().input?.disabled&&composer().send?.disabled&&composer().status.includes('You can only message friends'));
+  // Realtime's update keeps it so; friends again opens it.
+  sockets[0].frame('conversation.updated',{conversation:{...room,readOnly:true}});await sleep(20);
+  assert(composer().input?.disabled,'Read-only DM became writable after Realtime update');
+  sockets[0].frame('conversation.added',{conversation:room});
+  await wait('writable again',()=>composer().input&&!composer().input.disabled);
+ },(path,options,store)=>{
+  if(options.method==='DELETE'&&path===`/api/v1/friends/${friend.id}`){store.friends=[];store.rooms=store.rooms.map(r=>({...r,readOnly:true}));return new Response(null,{status:204});}
+ },{chat:true}));
  test('reconnect refreshes blocked state while Chat is visible, using current server collections',()=>fixture(async({mount,store,sockets})=>{
   const {root,handle}=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
   [...root.querySelectorAll('.sk-tab')].find(b=>b.textContent==='Chat').click();await openDm(root);await waitFor(()=>root.querySelector('[data-key="message"]'));

@@ -95,20 +95,54 @@ test('block write from an old SDK session rejects after reset',async t=>{
   await assert.rejects(request,e=>e.name==='AbortError');
 });
 
-test('local block purges the DM and late history; unblocking alone does not resurrect it',async t=>{
+test('a block keeps the DM readable and read-only; it stays so after unblocking until the two are friends again (TEAM-284)',async t=>{
   const room={id:'dm-room',kind:'dm',clanId:null,members:[{id:player.id,name:'Me',online:true},{id:friend.id,name:'Friend',online:false}]};
-  const late=deferred(),sockets=[],states=[];let reconnects=0;
+  const late=deferred(),sockets=[],states=[];
   const client={acquire:async()=>({token:'token'}),socketUrl:()=> 'ws://unused.test',listConversations:async()=>({conversations:[room]}),listMessages:()=>late.promise};
-  const controller=createChatController({client,onChange:s=>states.push(s),onReconnect:()=>reconnects++,socketFactory:()=>{
-    const socket={readyState:1,send(){},close(){},frame(type,data){this.onmessage?.({data:JSON.stringify({type,game_id:'game',data})});}};sockets.push(socket);return socket;
+  const controller=createChatController({client,onChange:s=>states.push(s),socketFactory:()=>{
+    const socket={readyState:1,sent:[],send(raw){this.sent.push(JSON.parse(raw));},close(){},frame(type,data){this.onmessage?.({data:JSON.stringify({type,game_id:'game',data})});}};sockets.push(socket);return socket;
   }});t.after(()=>controller.destroy());
   controller.configure({chat:{enabled:true,directMessages:true}},null);await tick();
   sockets[0].frame('hello',{playerId:player.id,configVersion:0});await tick();controller.select(friend.id);await tick();
+  // The local block (before Realtime's update): the DM and its history stay; nothing can be sent.
   controller.setPlayerBlocked(friend.id,true);
+  assert.deepEqual(states.at(-1).blockedPeers,[friend.id]);
   late.resolve({messages:[{id:'old',senderId:friend.id,senderName:'Friend',body:'Old history',createdAt:'2026-11-15T00:00:00Z'}],hasMore:false});await tick();
-  await controller.refresh();assert.equal(controller.resolve(friend.id),undefined);assert.equal(states.at(-1).messages[room.id],undefined);
-  await assert.rejects(controller.send(friend.id,'must not send'));
-  controller.setPlayerBlocked(friend.id,false);await controller.refresh();assert.equal(controller.resolve(friend.id),undefined);
-  client.listConversations=async()=>({conversations:[]});controller.reconnect();await tick();sockets[1].frame('hello',{playerId:player.id,configVersion:0});await tick();
-  assert.equal(reconnects,1);assert.equal(controller.resolve(friend.id),undefined);
+  assert.equal(controller.resolve(friend.id)?.id,room.id);assert.equal(states.at(-1).messages[room.id]?.[0]?.body,'Old history');
+  await assert.rejects(controller.send(friend.id,'must not send'),e=>e.code==='not_friends');
+  assert.equal(sockets[0].sent.filter(f=>f.type==='message.send').length,0);
+  // Realtime's update: the DM is read-only for both. Unblocking does not make them friends: it stays read-only.
+  sockets[0].frame('conversation.updated',{conversation:{...room,readOnly:true}});
+  client.listConversations=async()=>({conversations:[{...room,readOnly:true}]});
+  controller.setPlayerBlocked(friend.id,false);await controller.refresh();
+  assert.equal(controller.resolve(friend.id)?.readOnly,true);
+  await assert.rejects(controller.send(friend.id,'still not'),e=>e.code==='not_friends');
+  // Friends again: Realtime sends the same conversation as conversation.added without readOnly; it replaces the old one.
+  sockets[0].frame('conversation.added',{conversation:room});await tick();
+  assert.equal(states.at(-1).conversations.filter(c=>c.id===room.id).length,1);
+  assert.equal(controller.resolve(friend.id)?.readOnly,undefined);
+  void controller.send(friend.id,'hello again').catch(()=>{});
+  assert.equal(sockets[0].sent.filter(f=>f.type==='message.send').length,1);
+});
+
+test('removing a friend makes the DM read-only at once; an older list cannot undo it, friends again can (TEAM-284)',async t=>{
+  const room={id:'dm-room',kind:'dm',clanId:null,members:[{id:player.id,name:'Me',online:true},{id:friend.id,name:'Friend',online:true}]};
+  let answer=null;const sockets=[],states=[];
+  const client={acquire:async()=>({token:'token'}),socketUrl:()=> 'ws://unused.test',listMessages:async()=>({messages:[],hasMore:false}),
+    listConversations:()=>answer?answer.promise:Promise.resolve({conversations:[room]})};
+  const controller=createChatController({client,onChange:s=>states.push(s),socketFactory:()=>{
+    const socket={readyState:1,sent:[],send(raw){this.sent.push(JSON.parse(raw));},close(){},frame(type,data){this.onmessage?.({data:JSON.stringify({type,game_id:'game',data})});}};sockets.push(socket);return socket;
+  }});t.after(()=>controller.destroy());
+  controller.configure({chat:{enabled:true,directMessages:true}},null);await tick();
+  sockets[0].frame('hello',{playerId:player.id,configVersion:0});await tick();
+  // A list request is on its way (from before Realtime handled the removal) when the player removes the friend.
+  answer=deferred();const late=controller.refresh();
+  controller.endFriendship(friend.id);
+  assert.equal(controller.resolve(friend.id)?.readOnly,true);
+  answer.resolve({conversations:[room]});await late;answer=null;await controller.refresh();
+  assert.equal(controller.resolve(friend.id)?.readOnly,true,'an older list made the DM writable again');
+  await assert.rejects(controller.send(friend.id,'no'),e=>e.code==='not_friends');
+  // Friends again: Realtime sends conversation.added.
+  sockets[0].frame('conversation.added',{conversation:room});await tick();await controller.refresh();
+  assert.equal(controller.resolve(friend.id)?.readOnly,undefined);
 });
