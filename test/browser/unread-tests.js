@@ -47,16 +47,23 @@ export function registerUnreadTests({test,assert,container}) {
   await openDm(root,peer);await waitFor(()=>root.querySelector('.sk-msg'));
   const before=reads().length;
   target.style.display='none';await sleep(30);
-  socket.frame('message.new',{conversationId:room.id,message:message('hidden-1')});
-  await waitFor(()=>events.at(-1)?.total===1);
-  socket.frame('message.new',{conversationId:room.id,message:message('own',me)});await sleep(30);
-  assert(events.at(-1).total===1,'Own message counted as unread');
+  socket.frame('message.new',{conversationId:room.id,message:message('n-hidden-1')});
+  socket.frame('message.new',{conversationId:room.id,message:message('n-hidden-2')});
+  await waitFor(()=>events.at(-1)?.total===2);await sleep(30);
   assert(reads().length===before,'Read while the container was hidden');
   target.style.display='';
   await waitFor(()=>reads().length>before);
-  assert(reads().at(-1).data.lastMessageId==='own','Showing again did not read up to the newest message');
+  assert(reads().at(-1).data.lastMessageId==='n-hidden-2','Showing again did not read up to the newest message');
   await waitFor(()=>events.at(-1).total===0);
  },{history:[message('m1')]}));
+ test('the player\'s own reply clears the unread count and reads the conversation up to the reply',()=>fixture(async({root,room,socket,events,reads})=>{
+  // The reply arrives as Realtime's message.new for the player (from this tab or another one).
+  await waitFor(()=>events.at(-1)?.total===2);
+  socket.frame('message.new',{conversationId:room.id,message:message('reply',me)});
+  await waitFor(()=>events.at(-1).total===0);
+  assert(reads().at(-1)?.data.lastMessageId==='reply','Reply did not read the conversation up to it');
+  assert(!root.querySelector(`[data-key="convo-${peer}"] .sk-badge-count`),'Conversation still badged after the reply');
+ },{unread:2,history:[message('m1'),message('m2')]}));
  const tabBadge=(root,name)=>[...root.querySelectorAll('.sk-tab')].find(b=>b.textContent.startsWith(name))?.querySelector('.sk-badge-count')?.textContent??null;
  test('on the Clan tab, before Friends has loaded, the Chat tab still counts unread direct messages',()=>{
   const cfg=currentConfig();cfg.clan.enabled=true;cfg.friends.enabled=true;cfg.chat.enabled=true;cfg.chat.directMessages=true;cfg.chat.clanChat=true;cfg.layout.startCollapsed=false;

@@ -88,11 +88,16 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
   // unread count to 0 (the server does the same; it does not tell this tab). Returns whether the count changed.
   function read(key=selectedKey) {
     const current=room(key),last=current&&state.messages[current.id]?.at(-1);
-    if(last&&isVisible()&&readPositions.get(current.id)!==last.id&&socket?.readyState===1&&state.status==='connected'){
-      try{socket.send(JSON.stringify({type:'conversation.read',data:{conversationId:current.id,lastMessageId:last.id}}));readPositions.set(current.id,last.id);}catch{return false;} // A close can race the read; never fail the host page.
-      if(current.unread>0){state={...state,conversations:state.conversations.map(c=>c.id===current.id?{...c,unread:0}:c)};return true;}
+    if(last&&isVisible()&&readPositions.get(current.id)!==last.id&&sendRead(current.id,last.id)&&current.unread>0){
+      state={...state,conversations:state.conversations.map(c=>c.id===current.id?{...c,unread:0}:c)};return true;
     }
     return false;
+  }
+  // Moves the player's read position on Realtime to messageId. Returns whether the frame went out.
+  function sendRead(conversationId,messageId) {
+    if(socket?.readyState!==1||state.status!=='connected')return false;
+    try{socket.send(JSON.stringify({type:'conversation.read',data:{conversationId,lastMessageId:messageId}}));readPositions.set(conversationId,messageId);return true;}
+    catch{return false;} // A close can race the read; never fail the host page.
   }
   function remove(id) {
     knownRooms.delete(id);
@@ -165,8 +170,12 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
             if(!state.conversations.some(c=>c.id===d.conversationId&&allowed(c)))return;
             const message=messageDTO(d.message);merge(d.conversationId,[message]);
             // Another player's message is unread until read() below finds the conversation open and on screen (99 at most, like the server).
+            // The player's own message (from this tab or another) answers what came before: the conversation is read up to it,
+            // on Realtime too, whether or not it is on screen here. Realtime does not move the sender's read position itself.
             const fromOther=message.senderId!==state.playerId;
-            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:fromOther?Math.min(99,(c.unread??0)+1):c.unread}:c)};read();emit();
+            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:fromOther?Math.min(99,(c.unread??0)+1):0}:c)};
+            if(!fromOther&&readPositions.get(d.conversationId)!==message.id)sendRead(d.conversationId,message.id);
+            read();emit();
           }else if(frame.type==='message.ack'){
             const item=pending.get(d.replyTo);if(!item||typeof d.messageId!=='string')return;
             clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:''};
