@@ -7,18 +7,16 @@ export function decorateFriends(shadow,data,labels) {
   const busy=state.status!=='ready'||Boolean(state.pending)||(searching&&state.searchStatus==='loading');
   const doc=shadow.ownerDocument;
   const text=(node,value)=>{if(node&&node.textContent!==value)node.textContent=value;};
-  // `icon`: a round @clan/ui button that keeps its picture; the label goes to its name and tooltip, not its text.
-  const action=(parent,kind,id,label,{existing,icon=false}={})=>{
+  const action=(parent,kind,id,label,existing)=>{
     let button=existing??parent.querySelector(`[data-friend-action="${kind}"]`);
     if(!button){button=doc.createElement('button');button.type='button';button.className='sk-btn sk-btn-ghost';parent.append(button);}
     button.dataset.friendAction=kind;button.dataset.friendId=id;
-    const shown=state.pending?.action===kind&&state.pending.id===id?'Working…':label;
-    if(icon){if(button.title!==shown)button.title=shown;}else text(button,shown);
+    text(button,state.pending?.action===kind&&state.pending.id===id?'Working…':label);
     const name=(parent.closest('.sk-row, .sk-friend')??parent).querySelector('.sk-friend-name')?.textContent??'';
     button.disabled=busy;button.setAttribute('aria-label',`${label} · ${name}`);
   };
   const requests=data.requests??[];
-  // @clan/ui request row: picture, name and "Friend request" on the left, round Accept and Decline on the right.
+  // @clan/ui request row: picture, name and "Friend request" on the left, Accept and Decline on the right.
   shadow.querySelectorAll('.sk-content > .sk-row').forEach((row,index)=>{
     const request=requests[index];if(!request)return;
     const outgoing=request.direction==='outgoing';
@@ -29,8 +27,8 @@ export function decorateFriends(shadow,data,labels) {
       buttons.querySelectorAll('button:not([data-friend-action="cancel"])').forEach(button=>button.remove());
       action(buttons,'cancel',request.id,labels.cancel);
     }else{
-      action(buttons,'accept',request.id,labels.accept,{existing:buttons.querySelector('.sk-btn-accept'),icon:true});
-      action(buttons,'decline',request.id,'Decline',{existing:buttons.querySelector('.sk-btn-decline'),icon:true});
+      action(buttons,'accept',request.id,labels.accept,buttons.querySelector('.sk-btn-accept'));
+      action(buttons,'decline',request.id,'Decline',buttons.querySelector('.sk-btn-decline'));
     }
   });
   shadow.querySelectorAll('.sk-content > .sk-friend').forEach((row,index)=>{
