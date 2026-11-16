@@ -1,8 +1,14 @@
 const string=(value)=>typeof value==='string'&&value.length>0;
 export function messageDTO(m) {
   if(!m||!['id','senderId','createdAt'].every(key=>string(m[key]))||typeof m.senderName!=='string'||typeof m.body!=='string'||!Number.isFinite(Date.parse(m.createdAt)))throw new Error('Invalid Realtime message.');
-  return {id:m.id,senderId:m.senderId,senderName:m.senderName,body:m.body,createdAt:m.createdAt};
+  // kind: 'text' for what a player wrote; 'member_joined', 'member_left' or 'member_kicked' for a clan member change
+  // (senderId and senderName are the player it is about, the body is empty). A Realtime without kinds sends only text.
+  const kind=m.kind==null?'text':m.kind;
+  if(!string(kind))throw new Error('Invalid Realtime message.');
+  return {id:m.id,senderId:m.senderId,senderName:m.senderName,body:m.body,createdAt:m.createdAt,kind};
 }
+/** Whether a message is something a player wrote, not a clan member change; only those count as unread. */
+export const isText=message=>message.kind==='text';
 export function conversationDTO(c) {
   if(!c||!string(c.id)||!['dm','clan'].includes(c.kind)||!Array.isArray(c.members)||c.kind==='clan'&&!string(c.clanId))throw new Error('Invalid Realtime conversation.');
   return {...c,members:c.members.map(m=>{if(!string(m.id)||typeof m.name!=='string'||typeof m.online!=='boolean')throw new Error('Invalid Realtime member.');return {...m};})};
@@ -178,9 +184,12 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
             // Another player's message is unread until read() below finds the conversation open and on screen (99 at most, like the server).
             // The player's own message (from this tab or another) answers what came before: the conversation is read up to it,
             // on Realtime too, whether or not it is on screen here. Realtime does not move the sender's read position itself.
-            const fromOther=message.senderId!==state.playerId;
-            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:fromOther?Math.min(99,(c.unread??0)+1):0}:c)};
-            if(!fromOther&&readPositions.get(d.conversationId)!==message.id)sendRead(d.conversationId,message.id);
+            // A member change ("Ali joined the clan") is only the newest message: it is never unread (Realtime does not count
+            // it either), and one about the player themself is not a reply, so it leaves their count and read position alone.
+            const text=isText(message),fromOther=message.senderId!==state.playerId;
+            const unread=c=>!text?c.unread:fromOther?Math.min(99,(c.unread??0)+1):0;
+            state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:unread(c)}:c)};
+            if(text&&!fromOther&&readPositions.get(d.conversationId)!==message.id)sendRead(d.conversationId,message.id);
             read();emit();
           }else if(frame.type==='message.ack'){
             const item=pending.get(d.replyTo);if(!item||typeof d.messageId!=='string')return;

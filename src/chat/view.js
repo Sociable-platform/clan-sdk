@@ -1,7 +1,9 @@
 import {messageDTO} from './controller.js';
 export function chatView(state,config,clan) {
   const allowed=state?.conversations?.filter(c=>c.kind==='dm'?config.chat?.directMessages===true:config.chat?.clanChat===true&&config.clan?.enabled===true&&c.clanId===clan?.id)??[];
-  const map=m=>({id:m.id,from:m.senderName,body:m.body,mine:m.senderId===state.playerId,at:m.createdAt}); // at: when it was sent, for the widget's message times
+  // at: when it was sent, for the widget's message times. kind: 'text', or a clan member change ('member_joined',
+  // 'member_left', 'member_kicked') that @clan/ui draws as a line naming `from`.
+  const map=m=>({id:m.id,from:m.senderName,body:m.body,mine:m.senderId===state.playerId,at:m.createdAt,kind:m.kind??'text'});
   const peers=[],threads={},rooms={};
   // Unread messages per conversation, in the shape @clan/ui reads as data.unread.
   const unread={clan:0,direct:{}},count=room=>Number.isInteger(room.unread)&&room.unread>0?room.unread:0;
