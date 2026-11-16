@@ -40,7 +40,7 @@ npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
-new release just because `^0.1.65` allows one. To adopt a newer compatible release:
+new release just because `^0.1.70` allows one. To adopt a newer compatible release:
 
 ```sh
 npm update @clan/ui
@@ -50,7 +50,7 @@ npm run test:browser
 
 Include the resulting changed `package-lock.json` with every dependency update.
 Do not substitute `file:` links or copied repositories. The lockfile currently
-resolves registry release **0.1.65**, which is bundled into both browser formats.
+resolves registry release **0.1.70**, which is bundled into both browser formats.
 This renderer opens Chat on a conversation list; selecting a row opens its
 message history. The SDK reads the open header's `data-conversation` hook to
 route history, read receipts and sends to the correct Realtime conversation.
@@ -467,10 +467,16 @@ Initial loading requires `friends.enabled === true` and opening Friends. It uses
 
 Select a friend, choose **Block**, and confirm using the published UI's controls.
 Blocking removes friendship and pending requests in either direction. The SDK
-reloads all three collections and their counts, and clears that DM's messages,
-draft and pending send. The **Blocked** section loads actual Social players and
-its **Unblock** button removes only the caller's block. Unblock does not restore
-friendship, requests or DM membership; a new accepted friend request is required.
+reloads all three collections and their counts. Whenever a friendship ends, by
+**Remove friend** or **Block**, from either side, the DM is **kept, read-only**
+for both players (TEAM-284; Realtime keeps it, TEAM-283): it stays in the Chat
+list and opens with its history, but its message box is disabled with "You can
+only message friends." (the same for both players, however it ended), and it
+shows no online dot. Nobody is told who ended it. The
+**Blocked** section loads actual Social players and its **Unblock** button removes
+only the caller's block. Unblock does not restore friendship or requests, so the
+DM stays read-only; after a new accepted friend request the same conversation
+becomes writable again, with its history.
 Clan chat follows its existing membership rules. Pending mutations disable
 actions; realtime refreshes cannot release the duplicate-request guard.
 
