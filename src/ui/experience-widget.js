@@ -42,6 +42,14 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     const searching=state?.tab==='friends'&&Boolean(friendState?.query.trim());
     const self=chatState?.conversations.flatMap(room=>room.members).find(member=>member.id===chatState.playerId);
     const roster=state?.members??[],outgoing=friendState?.outgoing??[];
+    // @clan/ui reads data.friends on every tab: the Friends list, the Chat list, and the Chat tab's unread count
+    // (it adds up each friend's direct messages). Realtime knows who is online only for DM partners (the conversation
+    // list, then presence.update), so a friend gets `online` from their DM; a friend without one gets no dot.
+    // On the Clan tab before Friends has loaded, the DM partners stand in (they are all friends), so the count shows.
+    const online=new Map(view.peers.map(p=>[p.id,p.online]));
+    const withOnline=list=>list.map(p=>online.has(p.id)&&typeof online.get(p.id)==='boolean'?{...p,online:online.get(p.id)}:p);
+    const friendList=()=>state?.tab==='chat'?view.peers:searching?withOnline(friendState.players)
+      :friendState?.status==='ready'?withOnline(friendState.friends):state?.tab==='clan'?view.peers:withOnline(friendState?.friends??[]);
     // Members-panel friend offer: only confirmed Friends state says what a member is to the viewer.
     const relation=member=>{
       if(friendState?.status!=='ready')return member;
@@ -50,7 +58,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
         :friendState.blocked.some(p=>p.id===member.id)?{relation:'blocked'}:friendState.friends.some(p=>p.id===member.id)?{relation:'friend'}:{relation:'none'}};
     };
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:roster.map(relation),messages:view.messages,
-      friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
+      friends:friendList(),blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
       unread:view.unread,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
       actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id),
