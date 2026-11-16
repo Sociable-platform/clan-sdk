@@ -39,7 +39,7 @@ export function registerFriendsTests({test,assert,container}) {
  }
  test('Friends-only widget bootstraps/list maps Social IDs, both directions and no fabricated presence',()=>fixture(async({mount,calls})=>{
   const cfg=config();cfg.texts.labels.accept='Approve';cfg.texts.labels.cancel='Undo';const {root}=mount(cfg);await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
-  assert(calls[0].url.endsWith('/players/me')&&calls.length===4,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('.sk-friend-select').dataset.key===`friend-${friend.id}`,'Wrong friend identity');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
+  assert(calls[0].url.endsWith('/players/me')&&calls.length===4,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').getAttribute('aria-label').startsWith('Approve · ')&&root.querySelector('[data-friend-action="accept"]').title==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"] svg')&&root.querySelector('[data-friend-action="decline"] svg'),'Round request buttons lost their icons');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('.sk-friend-select').dataset.key===`friend-${friend.id}`,'Wrong friend identity');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
   assert(!root.querySelector('[data-friend-action="remove"], [data-friend-refresh]')&&!root.textContent.includes('Refresh friends'),'Standalone action added');
   assert(root.querySelector('.sk-friend').children.length===1&&!root.querySelector('.sk-member-panel'),'Closed menu leaves an extra row');
   assert(!root.querySelector('[data-sdk-status]'),'Empty status leaves extra spacing');
@@ -55,8 +55,13 @@ export function registerFriendsTests({test,assert,container}) {
  test('Friends search sends debounced server q, Add sends Social playerId then refreshes requests/search',()=>fixture(async({mount,calls})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));
   assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
-  root.querySelector('[data-friend-action="send"]').click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
+  const sendButton=root.querySelector('[data-friend-action="send"]');
+  assert(sendButton.parentElement.matches('.sk-friend-row')&&sendButton.getBoundingClientRect().left>root.querySelector('.sk-content > .sk-friend .sk-friend-name').getBoundingClientRect().right,'Add friend is not on the right of the player');
+  assert(sendButton.textContent==='Add friend','Wrong Add friend label');
+  sendButton.click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
   assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
+  const cancelButton=root.querySelector('.sk-content > .sk-friend [data-friend-action="cancel"]');
+  assert(cancelButton.parentElement.matches('.sk-friend-row')&&cancelButton.textContent==='Cancel','Cancel did not replace Add friend on the right');
   const post=calls.find(c=>c.method==='POST');assert(post.body===JSON.stringify({playerId:stranger.id}),'Wrong namespace/body');assert(calls.some(c=>c.url.endsWith('?q=New+%26+Player')),'Search query not encoded');assert(calls.filter(c=>c.url.endsWith('/friends/requests')&&c.method==='GET').length===2,'Requests not refreshed');
  }));
  test('Outgoing requests only offer Cancel while incoming requests offer Accept and Decline',()=>fixture(async({mount})=>{
@@ -91,7 +96,7 @@ export function registerFriendsTests({test,assert,container}) {
   assert(rows[3].querySelector('[data-friend-action="cancel"]'),'Missing outgoing request action');
   cfg.chat.directMessages=false;handle.updateConfig(cfg);
   root.querySelectorAll('.sk-content > .sk-friend').forEach(row=>{
-   assert(!row.querySelector('.sk-friend-row > .sk-btn'),'Chat rendered with direct messages disabled');
+   assert(!row.querySelector('.sk-friend-row > .sk-btn:not([data-friend-action])'),'Chat rendered with direct messages disabled');
    assert(row.querySelector('.sk-friend-name').getBoundingClientRect().width>0,'Disabling Chat hid player identity');
   });
  }));
