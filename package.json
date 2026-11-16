@@ -21,7 +21,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@clan/ui": "^0.1.70"
+    "@clan/ui": "^0.1.73"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
