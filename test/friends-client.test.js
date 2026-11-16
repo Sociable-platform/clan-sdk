@@ -68,6 +68,12 @@ test('default adapters distinguish player/request IDs without invented online st
  const r=friendRequests({incoming:[incoming],outgoing:[sent]});assert.equal(r.incoming[0].id,incoming.id);assert.equal(r.incoming[0].playerId,incoming.player.id);assert.equal(r.outgoing[0].direction,'outgoing');assert.equal(playerResults(search)[0].requestId,sent.id);
  assert.throws(()=>friendList({demoFriends:[]}));assert.throws(()=>playerResults({players:[{...search.players[0],requestId:null}]}));
 });
+test('friend list passes each friend\'s clan through; missing or malformed is null',()=>{
+ const clan={id:'5f1e2d3c-4b5a-4968-8778-6a5b4c3d2e1f',name:'Wolves'};
+ const f=friendList({friends:[{...friend,clan},{...friend,clan:null},{...friend},{...friend,clan:{id:'',name:'X'}},{...friend,clan:{id:'c',name:42}}]});
+ assert.deepEqual(f.map(p=>p.clan),[clan,null,null,null,null]);
+ assert.equal(friendList({friends:[{...friend,clan:{...clan,extra:1}}]})[0].clan.extra,undefined);
+});
 test('resetting one SDK does not invalidate another player SDK session',async t=>{
  let resolveA,resolveB;const pendingA=new Promise(done=>resolveA=done),pendingB=new Promise(done=>resolveB=done);
  recordingFetch(t,()=>pendingA,()=>pendingB);const a=sdk(),b=sdk();const old=a.listFriends(),other=b.listFriends();
