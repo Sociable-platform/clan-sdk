@@ -87,4 +87,9 @@ export function registerUnreadTests({test,assert,container}) {
   },{cfg,social:path=>path==='/api/v1/players/me'?json(player):path==='/api/v1/friends'?json({friends:[{id:peer,displayName:'Rashad',since:'2026-11-10T08:00:00Z'},other]})
    :path==='/api/v1/friends/requests'?json({incoming:[],outgoing:[]}):path==='/api/v1/players/me/blocks'?json({blocks:[]}):undefined});
  });
+ test('the Chat list shows a conversation\'s last message before its history is loaded, not "No messages yet"',()=>fixture(async({root})=>{
+  await waitFor(()=>root.querySelector(`[data-key="convo-${peer}"] .sk-badge-count`)?.textContent==='1');
+  const row=root.querySelector(`[data-key="convo-${peer}"]`);
+  assert(row.textContent.includes('Message m2')&&!row.textContent.includes('No messages yet'),'Row preview: '+row.textContent);
+ },{unread:1,history:[message('m1'),message('m2')]}));
 }

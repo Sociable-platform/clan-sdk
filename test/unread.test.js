@@ -117,3 +117,14 @@ test('the view passes each message\'s time to the widget as at',async t=>{
   const message=chatView(w.state(),config,{id:'social-clan'}).threads.peer[0];
   assert.equal(message.at,w.state().messages[dm.id][0].createdAt);
 });
+
+test('until a conversation\'s history is loaded, its thread is the last message from the conversation list',()=>{
+  const last={id:'last',senderId:'peer',senderName:'Peer',body:'see you',createdAt:'2026-11-15T10:00:00Z'};
+  const state={playerId:'me',messages:{},conversations:[{...dm,lastMessage:last,unread:1},{...clan,lastMessage:{...last,id:'c-last',senderId:'me'}}]};
+  const view=chatView(state,config,{id:'social-clan'});
+  assert.deepEqual(view.threads.peer,[{id:'last',from:'Peer',body:'see you',mine:false,at:last.createdAt}]);
+  assert.equal(view.threads.clan[0].mine,true);
+  // Loaded history replaces it; an invalid last message is left out.
+  assert.deepEqual(chatView({...state,messages:{[dm.id]:[{...last,id:'h1',body:'from history'}]}},config,{id:'social-clan'}).threads.peer.map(m=>m.id),['h1']);
+  assert.deepEqual(chatView({...state,conversations:[{...dm,lastMessage:{id:'x'}}]},config,{id:'social-clan'}).threads.peer,[]);
+});
