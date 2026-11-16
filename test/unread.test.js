@@ -31,12 +31,26 @@ test('the view passes the server\'s unread counts as data.unread: the clan, and 
   assert.deepEqual(w.unread(),{clan:3,direct:{peer:2}});
 });
 
-test('another player\'s message in a conversation that is not open counts as unread; the player\'s own does not',async t=>{
+test('another player\'s message in a conversation that is not open counts as unread',async t=>{
   const w=await world(t);
   w.socket.frame('message.new',{conversationId:dm.id,message:msg('m1')});
-  w.socket.frame('message.new',{conversationId:dm.id,message:msg('m2','me')});
   assert.deepEqual(w.unread(),{clan:3,direct:{peer:3}});
   assert.equal(w.reads().length,0);
+});
+
+test('the player\'s own reply reads the conversation up to it, on Realtime too, even when it is not on screen here',async t=>{
+  // Another tab (or a widget the game hides) sent it: replying means the player saw what came before.
+  const w=await world(t,{visible:()=>false});
+  w.socket.frame('message.new',{conversationId:dm.id,message:msg('m1')});
+  assert.equal(w.unread().direct.peer,3);
+  w.socket.frame('message.new',{conversationId:dm.id,message:msg('reply','me')});
+  assert.deepEqual(w.unread(),{clan:3,direct:{}});
+  assert.deepEqual(w.reads().map(f=>f.data),[{conversationId:dm.id,lastMessageId:'reply'}]);
+  // The same reply again (a repeated frame) sends nothing more; a new message from the friend counts again.
+  w.socket.frame('message.new',{conversationId:dm.id,message:msg('reply','me')});
+  w.socket.frame('message.new',{conversationId:dm.id,message:msg('m2')});
+  assert.equal(w.reads().length,1);
+  assert.equal(w.unread().direct.peer,1);
 });
 
 test('the count stops at 99, like the server\'s',async t=>{
