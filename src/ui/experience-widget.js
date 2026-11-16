@@ -23,8 +23,10 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   // The widget is seen: the tab is in front and the game shows the container (a hidden container has no boxes).
   const seen=()=>doc.visibilityState!=='hidden'&&host.getClientRects().length>0;
   // What is new for the player, for the game's own button: friend requests they received, and unread clan and
-  // direct messages. Sent as clan-sdk:unread whenever it changes (also when it drops to 0).
+  // direct messages. Sent as clan-sdk:unread whenever it changes (also when it drops to 0), and once when mounted.
   function reportUnread(unread) {
+    // The first render runs before the host is in the page: an event from there would reach nobody.
+    if(!host.isConnected)return;
     const requests=friendState?.status==='ready'?friendState.incoming.length:0;
     const direct=Object.values(unread.direct).reduce((sum,n)=>sum+n,0);
     const detail={total:requests+unread.clan+direct,requests,clan:unread.clan,direct:{...unread.direct}};
@@ -79,7 +81,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       void controller.start();friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state?.clan?.id);
     }
   }
-  try {boot();container.append(host);reserveContainer(container);}
+  try {boot();container.append(host);reserveContainer(container);if(live)reportUnread(chatView(chatState,current,state?.clan).unread);}
   catch(error){controller?.destroy();friends?.destroy();chat?.destroy();renderer?.destroy();host.remove();throw error;}
   const unsubscribe=live?playerSession(sdk)?.subscribe(()=>{
     controller.destroy();friends.destroy();chat.destroy();renderer.destroy();boot();

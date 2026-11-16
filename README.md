@@ -512,6 +512,8 @@ container.addEventListener('clan-sdk:unread', event => {
 
 `requests` counts friend requests the player received (known once Friends has loaded, after a live `friend_request` notification or when the browser tab comes back to the front). To keep counting while the panel is closed, keep the widget mounted and hide its container (for example `hidden` or `display: none`) instead of destroying it: nothing is marked read while the container is hidden or the browser tab is in the background, and what is on screen is read as soon as the container is shown again.
 
+Opt-in live check against local Social and Realtime (two disposable players, the built ESM in Chrome): `npm run build`, then `LIVE_UNREAD_GAME_ID=<game id> LIVE_UNREAD_DEV_KEY=<external development signing-key path> node test/live/unread.mjs`. It serves its page on `http://localhost:5174` (that origin must be in both services' CORS lists; Chrome is pointed at 127.0.0.1, so a dev server on `[::1]:5174` may keep running). It checks the badge, the event, reads on open, nothing read while hidden, and the server read position after a reload, then removes the friendship. Keys and tokens are never printed.
+
 ## Social client API (unchanged)
 
 ```js

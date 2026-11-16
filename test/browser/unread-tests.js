@@ -29,7 +29,8 @@ export function registerUnreadTests({test,assert,container}) {
  test('server unread count is badged on the conversation, reported to the game, and opening it reads it',()=>fixture(async({root,room,events,reads})=>{
   await waitFor(()=>root.querySelector(`[data-key="convo-${peer}"] .sk-badge-count`));
   assert(root.querySelector(`[data-key="convo-${peer}"] .sk-badge-count`).textContent==='3','Wrong conversation badge');
-  await waitFor(()=>events.length);
+  assert(events[0]&&events[0].total===0,'No clan-sdk:unread when mounted: '+JSON.stringify(events[0]));
+  await waitFor(()=>events.at(-1).total===3);
   assert(JSON.stringify(events.at(-1))===JSON.stringify({total:3,requests:0,clan:0,direct:{[peer]:3}}),'Wrong clan-sdk:unread detail: '+JSON.stringify(events.at(-1)));
   assert(reads().length===0,'Read before the conversation was open');
   await openDm(root,peer);
