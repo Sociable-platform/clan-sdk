@@ -44,6 +44,14 @@ export function registerFriendsTests({test,assert,container}) {
   assert(root.querySelector('.sk-friend').children.length===1&&!root.querySelector('.sk-member-panel'),'Closed menu leaves an extra row');
   assert(!root.querySelector('[data-sdk-status]'),'Empty status leaves extra spacing');
  }));
+ test('Friends list shows each friend\'s clan under the name, and no line without one',()=>fixture(async({mount,store})=>{
+  const other={id:'44444444-4444-4444-8444-444444444444',displayName:'Clanless',since:friend.since,clan:null};
+  store.friends=[{...friend,clan:{id:'55555555-5555-4555-8555-555555555555',name:'Wolves'}},other,{...friend,id:'66666666-6666-4666-8666-666666666666',displayName:'Old Backend'}];
+  const {root}=mount(config());await waitFor(()=>root.querySelectorAll('.sk-friend-select:not(:disabled)').length===3);
+  const line=id=>root.querySelector(`[data-key="friend-${id}"] .sk-row-main .sk-desc`);
+  assert(line(friend.id)?.textContent==='Wolves'&&line(friend.id).getBoundingClientRect().height>0,'Friend clan not shown under the name');
+  assert(!line(other.id)&&!line('66666666-6666-4666-8666-666666666666'),'Clan line shown for a friend in no clan');
+ }));
  test('Friends search sends debounced server q, Add sends Social playerId then refreshes requests/search',()=>fixture(async({mount,calls})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));
   assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
