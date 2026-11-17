@@ -77,8 +77,11 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
     renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body),onChatRefresh:()=>chat.refresh()});
-    chat=createChatController({client:chatClient(sdk),isVisible:seen,onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh({background:true}),onReconnect:()=>friends.refresh({background:true}),onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
-      if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
+    chat=createChatController({client:chatClient(sdk),isVisible:seen,onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh({background:true}),onReconnect:()=>{friends.refresh({background:true});controller.rosterChanged(state?.clan?.id);},onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
+      // roster: a member line in the clan chat (TEAM-294). onReconnect reads the clan again too, for a change made
+      // while the socket was down, which no frame announced.
+      if(event.kind==='roster')controller.rosterChanged(event.clanId);
+      else if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
     friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.endFriendship(id);}});
