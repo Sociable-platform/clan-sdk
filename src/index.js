@@ -31,6 +31,13 @@ class SDK {
   listBlocks() { return clients.get(this).friends.listBlocks(); }
   blockPlayer(id) { return clients.get(this).friends.blockPlayer(id); }
   unblockPlayer(id) { return clients.get(this).friends.unblockPlayer(id); }
+  // Closed clans: a player asks to join, the clan's leaders accept or decline (Social decides who may).
+  requestClanJoin(clanId) { return clients.get(this).requestClanJoin(clanId); }
+  cancelClanJoinRequest(clanId) { return clients.get(this).cancelClanJoinRequest(clanId); }
+  listClanJoinRequests(clanId) { return clients.get(this).listClanJoinRequests(clanId); }
+  acceptClanJoinRequest(clanId,requestId) { return clients.get(this).acceptClanJoinRequest(clanId,requestId); }
+  declineClanJoinRequest(clanId,requestId) { return clients.get(this).declineClanJoinRequest(clanId,requestId); }
+  setClanJoinPolicy(clanId,joinPolicy) { return clients.get(this).setClanJoinPolicy(clanId,joinPolicy); }
   resetPlayerSession() { clients.get(this).session.reset(); }
   mountExperience(options) {
     const load = platformLoaders.get(this);

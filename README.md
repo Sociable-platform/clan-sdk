@@ -666,6 +666,39 @@ the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}
 
 Verification and changed files: [TEAM-214 report](TEAM-214.md).
 
+## Closed clans: ask to join, leaders answer
+
+A clan is `open` (anyone joins) or `closed`: a player of a closed clan is accepted by the clan's leaders (its owner, and any role
+with `canKick` in the game's `clan.roles`). Social decides who may; clans made before this are open.
+
+```js
+await sdk.createClan({ name, joinPolicy: 'closed' });  // 'open' when left out
+await sdk.requestClanJoin(clanId);                     // 201 {id, playerId, displayName, createdAt}
+await sdk.cancelClanJoinRequest(clanId);               // 204: the caller takes their request back
+await sdk.listClanJoinRequests(clanId);                // 200 {requests: [{id, playerId, displayName, createdAt}]}, leaders only
+await sdk.acceptClanJoinRequest(clanId, requestId);    // 204: the player becomes a member
+await sdk.declineClanJoinRequest(clanId, requestId);   // 204: they may ask again
+await sdk.setClanJoinPolicy(clanId, 'open');           // 200 clan, owner only
+```
+
+The clan list (`GET /api/v1/clans`) gives each clan a `joinPolicy`, and `requested: true` on the clans the caller asked. Errors
+keep status, code and message: 403 `clan_closed` (joining a closed clan directly), 403 `not_allowed`, 404 `request_not_found`, 409
+`clan_open`, `already_requested`, `too_many_requests` (5 pending per player), `clan_requests_full` (50 per clan), `clan_full`,
+`already_in_clan`.
+
+**The mounted panel.** `join(clanId)` on a closed clan sends a request instead, and the clan stays in the list as `requested` until
+a leader decides; a click on it takes the request back. An answer that says what changed fixes the mark instead of failing the
+player: `already_requested` marks the clan, `request_not_found` clears it, `clan_open` or `clan_full` read the list again. A leader of
+a closed clan gets the pending requests as `joinRequests` (`{id, playerId, name, at}`), and answers them one at a time; a member whose
+role may not decide gets a 403 once and is not asked again for that clan and role. The owner opens and closes the clan with
+`setJoinPolicy`; opening drops the list (players join directly now).
+
+Realtime keeps it live: `clan_join_request` re-reads the leaders' requests, and `clan_join_declined` re-reads the player's clan list.
+Events: `clan-sdk:join-requested` `{clanId}`, `clan-sdk:join-request-accepted` and `clan-sdk:join-request-declined`
+`{clanId,playerId,requestId}`, `clan-sdk:join-declined` `{clanId}` (the player's own request was declined) and
+`clan-sdk:join-policy-changed` `{clanId,joinPolicy}`. A host that does not know closed clans (an older SDK with a newer Social) sees a
+403 `clan_closed` on Join, with Social's own message.
+
 ## Clan member management (TEAM-257)
 
 ```js
