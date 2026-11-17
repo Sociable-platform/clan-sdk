@@ -247,6 +247,8 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
               for(const c of [...state.conversations])if(c.kind==='clan'&&c.clanId===id){revokedRooms.set(c.id,id);remove(c.id);}
               onMembership({kind:d.kind,clanId:id});emit();
             }else if(d.kind==='clan_joined'&&typeof d.payload?.clanId==='string'){onMembership({kind:d.kind,clanId:d.payload.clanId});void refresh();}
+            // Closed clans: somebody asked to join this player's clan, or this player's request was declined.
+            else if(['clan_join_request','clan_join_declined'].includes(d.kind)&&typeof d.payload?.clanId==='string')onMembership({kind:d.kind,clanId:d.payload.clanId});
             else if(['friend_request','friend_request_cancelled','friend_request_declined','friend_accepted'].includes(d.kind))onNotification(d);
           }
           else if(frame.type==='config.updated')onConfig(d);

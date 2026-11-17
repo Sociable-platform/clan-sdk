@@ -29,6 +29,24 @@ export function socialClanAdapter(response) {
       if(typeof clan[field]!=='string')throw new TypeError(`Invalid Social clan at clans[${index}].${field}: expected string.`);
       details[field]=clan[field];
     }
+    // joinPolicy: 'open' or 'closed' (a player of a closed clan asks, and a leader accepts). Anything else, or nothing from a
+    // Social before closed clans, is left out and the clan reads as open. requested: only ever true, the caller asked this clan.
+    if(['open','closed'].includes(clan.joinPolicy))details.joinPolicy=clan.joinPolicy;
+    if(clan.requested===true)details.requested=true;
     return { id:clan.id, name:clan.name, memberCount:clan.memberCount, maxMembers:clan.maxMembers,...details };
+  });
+}
+
+/** Social's JoinRequestList: the players who asked to join the caller's closed clan, oldest first. */
+export function joinRequestsAdapter(response) {
+  if (!response || typeof response !== 'object' || !Array.isArray(response.requests)) {
+    throw new TypeError('Social join request list must contain a requests array.');
+  }
+  return response.requests.map((request, index) => {
+    if (!request || typeof request !== 'object' || typeof request.id !== 'string' || !request.id.trim()
+      || typeof request.playerId !== 'string' || !request.playerId.trim() || typeof request.displayName !== 'string') {
+      throw new TypeError(`Invalid Social join request at requests[${index}]: expected id, playerId and displayName.`);
+    }
+    return {id:request.id, playerId:request.playerId, name:request.displayName, ...(typeof request.createdAt==='string'?{at:request.createdAt}:{})};
   });
 }

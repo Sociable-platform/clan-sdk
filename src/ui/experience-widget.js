@@ -60,6 +60,8 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
         :friendState.blocked.some(p=>p.id===member.id)?{relation:'blocked'}:friendState.friends.some(p=>p.id===member.id)?{relation:'friend'}:{relation:'none'}};
     };
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:roster.map(relation),messages:view.messages,
+      // Closed clans: the players who asked to join the player's clan (only a leader gets any), what is being answered, and the last error.
+      clanRequests:state?.joinRequests??[],clanRequestPending:state?.requestPending??null,clanRequestError:state?.requestError??'',
       friends:friendList(),blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
       unread:view.unread,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
@@ -67,6 +69,8 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
         addFriend:id=>friendActions.action('send',id),cancelFriendRequest:(playerId,requestId)=>friendActions.action('cancel',requestId??outgoing.find(r=>r.playerId===playerId)?.id),
         setRole:(id,role)=>{const member=roster.find(m=>m.id===id),step=member&&roleStep(current,member.role,role);if(step)clanActions.manageMember(step,id);},
         kick:id=>clanActions.manageMember('kick',id),
+        // Closed clans. join(id) asks a closed clan instead of joining it; the rest is for the leaders and the owner.
+        cancelJoinRequest:id=>clanActions.cancelJoinRequest(id),acceptJoinRequest:id=>clanActions.acceptRequest(id),declineJoinRequest:id=>clanActions.declineRequest(id),setJoinPolicy:policy=>clanActions.setJoinPolicy(policy),
         // The panel shows a conversation with unread messages ('clan' or a friend's ID): tell Realtime it was read.
         markRead:key=>chatActions.markRead(key)}};
   }
@@ -81,6 +85,8 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       // roster: a member line in the clan chat (TEAM-294). onReconnect reads the clan again too, for a change made
       // while the socket was down, which no frame announced.
       if(event.kind==='roster')controller.rosterChanged(event.clanId);
+      else if(event.kind==='clan_join_request')controller.requestsChanged(event.clanId);
+      else if(event.kind==='clan_join_declined')controller.joinRequestDeclined(event.clanId);
       else if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
