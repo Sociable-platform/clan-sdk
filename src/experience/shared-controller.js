@@ -2,7 +2,10 @@ import {createDiscoverController} from './discover-controller.js';
 import {socialClanAdapter,memberRoleAdapter} from '../social/clan-adapter.js';
 
 // Runtime state and confirmed HTTP actions only; @clan/ui owns the visual tree.
-export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen}) {
+// How long a change in the clan's members waits before the clan is read again, so a burst of joins shares one read.
+const ROSTER_DELAY_MS = 500;
+
+export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen, rosterDelay = ROSTER_DELAY_MS}) {
   let dead = false;
   let revision = 0;
   let visit = 0;
@@ -10,7 +13,13 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
   let state = {screen:'discover', tab:'clan', clan:null, role:null, members:[],
     status:'idle', clans:[], query:'', error:'', joinError:'', pendingJoin:null,
     joinedClanId:null, profilePending:false, membershipKnown:false, createPending:false,leavePending:false,leaveError:'',memberPending:null,memberError:''};
-  const emit = () => { if (!dead) onChange({...state}); };
+  let rosterTimer=null,rosterReading=false,rosterAgain=false,rosterWaiting=false;
+  const emit = () => {
+    if (dead) return;
+    onChange({...state});
+    // A roster read that waited for the player's own clan read goes once that read is over (see readRoster).
+    if (rosterWaiting && !state.profilePending) { rosterWaiting = false; rosterTimer ??= setTimeout(readRoster, rosterDelay); }
+  };
   const fail = error => {
     state = {...state, error:error?.message || 'Social request failed.', profilePending:false};
     emit();
@@ -56,11 +65,12 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
   }
   // withRole also re-reads myClan: no realtime frame tells remaining members
   // about role changes or kicks, so opening Members must not show stale power.
-  async function members({withRole=false}={}) {
+  // quiet: a read nobody asked for (TEAM-294). It shows no error: a failure keeps the last roster.
+  async function members({withRole=false,quiet=false}={}) {
     if(state.leavePending||!state.clan)return;
     const generation=membershipGeneration,clanId=state.clan.id;
     const ticket = ++revision;
-    state = {...state, error:''}; emit();
+    if(!quiet){state = {...state, error:''}; emit();}
     const own=withRole?Promise.resolve().then(()=>sdk.myClan()).then(value=>({value}),error=>({error})):null;
     try {
       const value = await sdk.clanMembers(clanId);
@@ -77,10 +87,48 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       }
       state = next; emit();
       if (moved) void membership(state.screen,{preserveView:true});
-    } catch (error) { if (!dead && ticket === revision && generation===membershipGeneration) fail(error); }
+    } catch (error) { if (!quiet && !dead && ticket === revision && generation===membershipGeneration) fail(error); }
+  }
+  // TEAM-294: another player joined, left or was removed. The clan is read again in the background so the member
+  // count on the banner follows, and on Members the roster too. Changes close together share one read; one that comes
+  // in while a read is running gets another read after it, so the last change is never missed.
+  function rosterChanged(clanId) {
+    if(dead||!enabled||!clanId||state.clan?.id!==clanId)return;
+    if(rosterReading){rosterAgain=true;return;}
+    rosterTimer??=setTimeout(readRoster,rosterDelay);
+  }
+  async function readRoster() {
+    rosterTimer=null;
+    if(dead||!enabled||!state.clan||!state.membershipKnown||state.leavePending)return;
+    // The clan is already being read (the player's own action): read again after it, without cutting it off.
+    if(state.profilePending){rosterWaiting=true;return;}
+    rosterReading=true;rosterAgain=false;
+    try {
+      if(state.screen==='members')await members({withRole:true,quiet:true});
+      else await quietClan();
+    } finally {rosterReading=false;}
+    if(rosterAgain&&!dead){rosterAgain=false;rosterTimer??=setTimeout(readRoster,rosterDelay);}
+  }
+  async function quietClan() {
+    const generation=membershipGeneration,clanId=state.clan.id;
+    const current=()=>!dead&&enabled&&generation===membershipGeneration&&state.clan?.id===clanId&&!state.leavePending&&!state.profilePending;
+    let result;
+    try {result=await sdk.myClan();}
+    catch(error) {
+      // No longer in this clan: the full membership read moves the panel on. Any other failure keeps the last count.
+      if(error?.status===404&&error.code==='not_in_clan'&&current())void membership(state.screen,{preserveView:true});
+      return;
+    }
+    if(!current())return;
+    let clan;
+    try {[clan]=socialClanAdapter({clans:[result?.clan]});} catch {return;}
+    if(clan.id!==clanId){void membership(state.screen,{preserveView:true});return;}
+    const role=typeof result.role==='string'&&result.role.trim()?result.role:state.role;
+    state={...state,clan,role};emit();
   }
   return {
     refreshMembership() {if(dead||!enabled||state.profilePending||state.leavePending)return;return membership(state.clan?state.screen:'home',{preserveView:true});},
+    rosterChanged,
     invalidateClan(id) {
       if(dead||state.clan?.id!==id)return;
       revision++;membershipGeneration++;visit++;
@@ -185,6 +233,6 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       state = {...state, status:'idle', profilePending:false, membershipKnown:false,leavePending:false,leaveError:'',memberPending:null,memberError:''}; emit();
       if (value) void membership();
     },
-    destroy() { dead = true; revision++; visit++; list.destroy(); },
+    destroy() { dead = true; revision++; visit++; clearTimeout(rosterTimer); rosterTimer = null; rosterWaiting = false; list.destroy(); },
   };
 }

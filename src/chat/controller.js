@@ -12,6 +12,9 @@ export function messageDTO(m) {
 }
 /** Whether a message is something a player wrote, not a clan member change; only those count as unread. */
 export const isText=message=>message.kind==='text';
+const MEMBER_KINDS=new Set(['member_joined','member_left','member_kicked']);
+/** Whether a message says the clan's members changed: a player joined, left or was removed. */
+export const isMemberChange=message=>MEMBER_KINDS.has(message.kind);
 export function conversationDTO(c) {
   if(!c||!string(c.id)||!['dm','clan'].includes(c.kind)||!Array.isArray(c.members)||c.kind==='clan'&&!string(c.clanId))throw new Error('Invalid Realtime conversation.');
   return {...c,members:c.members.map(m=>{if(!string(m.id)||typeof m.name!=='string'||typeof m.online!=='boolean')throw new Error('Invalid Realtime member.');return {...m};})};
@@ -194,6 +197,10 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
             state={...state,conversations:state.conversations.map(c=>c.id===d.conversationId?{...c,lastMessage:message,unread:unread(c)}:c)};
             if(text&&!fromOther&&readPositions.get(d.conversationId)!==message.id)sendRead(d.conversationId,message.id);
             read();emit();
+            // The clan's members changed (TEAM-294): every member online hears it here, so the clan is read again and
+            // its member count follows without waiting for the player to open Members.
+            const room=state.conversations.find(c=>c.id===d.conversationId);
+            if(room?.kind==='clan'&&isMemberChange(message))onMembership({kind:'roster',clanId:room.clanId});
           }else if(frame.type==='message.ack'){
             const item=pending.get(d.replyTo);if(!item||typeof d.messageId!=='string')return;
             clearTimeout(item.timer);pending.delete(d.replyTo);state={...state,pending:null,error:''};
