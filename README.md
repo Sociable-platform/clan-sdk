@@ -40,7 +40,7 @@ npm run test:bundle
 ```
 
 `npm ci` installs the exact version in `package-lock.json`; it does not select a
-new release just because `^0.1.73` allows one. To adopt a newer compatible release:
+new release just because `^0.1.97` allows one. To adopt a newer compatible release:
 
 ```sh
 npm update @clan/ui
@@ -50,7 +50,7 @@ npm run test:browser
 
 Include the resulting changed `package-lock.json` with every dependency update.
 Do not substitute `file:` links or copied repositories. The lockfile currently
-resolves registry release **0.1.73**, which is bundled into both browser formats.
+resolves registry release **0.1.97**, which is bundled into both browser formats.
 This renderer opens Chat on a conversation list; selecting a row opens its
 message history. The SDK reads the open header's `data-conversation` hook to
 route history, read receipts and sends to the correct Realtime conversation.
