@@ -72,11 +72,31 @@ export function registerClanManageTests({test,assert,container}) {
   const post=calls.find(c=>c.url.endsWith('/friends/requests')&&c.method==='POST');assert(JSON.parse(post.body).playerId===memberId&&sent.send===1,'Wrong friend request');
   await waitFor(()=>!button(open(root),'Cancel friend request to Leyla').disabled);button(open(root),'Cancel friend request to Leyla').click();
   await waitFor(()=>button(open(root),'Add Leyla as a friend'));assert(sent.cancel===1&&calls.some(c=>c.url.endsWith('/friends/requests/req-1')&&c.method==='DELETE'),'Cancel not sent');
-  assert(open(root,friend.id).textContent.includes('are friends'),'Existing friend offered Add friend');
+  assert(open(root,friend.id).textContent.includes('Friends'),'Existing friend offered Add friend');
  }));
 
  test('destroy during a pending kick ignores the late answer',()=>{const gate=deferred();return fixture(async({mountMembers,sent})=>{
   const {root,handle,target}=await mountMembers();button(open(root),'Kick').click();[...root.querySelectorAll('[role="alertdialog"] button')].find(b=>b.textContent==='Kick').click();
   await waitFor(()=>sent.kick===1);handle.destroy();gate.resolve();await sleep(20);assert(!target.querySelector('[data-clan-ui]'),'Late kick restored DOM');
  },{gate});});
+ // TEAM-302: a game gives the Elder role the power to answer join requests (canHandleRequests) and publishes; the widget's
+ // config update asks Social again, so the Elder sees the requests without a reload.
+ test('a config update that lets the player\'s role answer join requests shows them without a reload',()=>{let allowed=false,lists=0;return withSocial(container,async(url,options)=>{
+  const path=new URL(url).pathname,method=options?.method??'GET';
+  if(path.endsWith('/players/me/clan'))return json({clan:{...clan,joinPolicy:'closed'},role:'elder'});
+  if(path.endsWith('/players/me'))return json(player);
+  if(path.endsWith('/players/me/blocks'))return json({blocks:[]});
+  if(path==='/api/v1/friends')return json({friends:[]});
+  if(path==='/api/v1/friends/requests')return json({incoming:[],outgoing:[]});
+  if(path.endsWith('/members')&&method==='GET')return json({members:[{playerId:player.id,displayName:player.displayName,role:'elder'}]});
+  if(path.endsWith('/requests')&&method==='GET'){lists++;return allowed?json({requests:[{id:'r1',playerId:memberId,displayName:'Leyla',createdAt:'2026-11-17T09:12:00Z'}]}):json({error:{code:'not_allowed',message:'Your clan role does not allow this'}},403);}
+  throw new Error('Unexpected mock route '+method+' '+path);
+ },async({mount})=>{
+  const config=()=>{const c=currentConfig();c.clan.roles=roles;return c;};
+  const {root,handle}=mount(config());await waitFor(()=>root.querySelector('.sk-card-title')&&lists===1);await sleep(20);
+  assert(!root.querySelector('[data-key="requests-notice"]'),'A role that may not answer saw the requests');
+  allowed=true;handle.updateConfig(config());
+  await waitFor(()=>root.querySelector('[data-key="requests-notice"]'));
+  assert(lists===2,`Social was asked ${lists} times, want 2`);
+ });});
 }

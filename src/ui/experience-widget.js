@@ -15,20 +15,43 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   assertContainerAvailable(container);
   let current=widgetConfig(config,{validate});
   if(typeof clanAdapter!=='function')throw new TypeError('clanAdapter must be a function when supplied.');
-  let destroyed=false,state,friendState,chatState,controller,friends,chat,renderer;
+  let destroyed=false,state,friendState,chatState,controller,friends,chat,renderer,lastUnread='';
   const live=previewData===undefined;
   const doc=container.ownerDocument,host=doc.createElement('div');host.dataset.clanSdkWidget='experience';
   for(const [key,value]of Object.entries({all:'initial',display:'block',position:'fixed',inset:'0','pointer-events':'none','z-index':'1000',margin:'0',padding:'0',border:'0'}))host.style.setProperty(key,value,'important');
   const notify=(name,detail)=>host.dispatchEvent(new doc.defaultView.CustomEvent(`clan-sdk:${name}`,{detail,bubbles:true,composed:true}));
+  // The widget is seen: the tab is in front and the game shows the container (a hidden container has no boxes).
+  const seen=()=>doc.visibilityState!=='hidden'&&host.getClientRects().length>0;
+  // What is new for the player, for the game's own button: friend requests they received, and unread clan and
+  // direct messages. Sent as clan-sdk:unread whenever it changes (also when it drops to 0), and once when mounted.
+  function reportUnread(unread) {
+    // The first render runs before the host is in the page: an event from there would reach nobody.
+    if(!host.isConnected)return;
+    const requests=friendState?.status==='ready'?friendState.incoming.length:0;
+    const direct=Object.values(unread.direct).reduce((sum,n)=>sum+n,0);
+    const detail={total:requests+unread.clan+direct,requests,clan:unread.clan,direct:{...unread.direct}};
+    const key=JSON.stringify(detail);if(key===lastUnread)return;lastUnread=key;notify('unread',detail);
+  }
   function data() {
     if(!live)return previewData;
     // Bind component actions to this generation, not the mutable replacement
     // controllers. Detached old nodes must never invoke the next player's actions.
-    const clanActions=controller,friendActions=friends;
+    const clanActions=controller,friendActions=friends,chatActions=chat;
     const view=chatView(chatState,current,state?.clan);
+    reportUnread(view.unread);
     const searching=state?.tab==='friends'&&Boolean(friendState?.query.trim());
     const self=chatState?.conversations.flatMap(room=>room.members).find(member=>member.id===chatState.playerId);
     const roster=state?.members??[],outgoing=friendState?.outgoing??[];
+    // @clan/ui reads data.friends on every tab: the Friends list, the Chat list, and the Chat tab's unread count
+    // (it adds up each friend's direct messages). Realtime knows who is online only for DM partners (the conversation
+    // list, then presence.update), so a friend gets `online` from their DM; a friend without one gets no dot.
+    // On the Clan tab before Friends has loaded, the DM partners stand in (they are all friends), so the count shows.
+    // Read-only DMs (a block ended the friendship) are not friends: no online state, and not stand-ins on the Clan tab.
+    const friendPeers=view.peers.filter(p=>!p.readOnly);
+    const online=new Map(friendPeers.map(p=>[p.id,p.online]));
+    const withOnline=list=>list.map(p=>online.has(p.id)&&typeof online.get(p.id)==='boolean'?{...p,online:online.get(p.id)}:p);
+    const friendList=()=>state?.tab==='chat'?view.peers:searching?withOnline(friendState.players)
+      :friendState?.status==='ready'?withOnline(friendState.friends):state?.tab==='clan'?friendPeers:withOnline(friendState?.friends??[]);
     // Members-panel friend offer: only confirmed Friends state says what a member is to the viewer.
     const relation=member=>{
       if(friendState?.status!=='ready')return member;
@@ -37,12 +60,19 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
         :friendState.blocked.some(p=>p.id===member.id)?{relation:'blocked'}:friendState.friends.some(p=>p.id===member.id)?{relation:'friend'}:{relation:'none'}};
     };
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:roster.map(relation),messages:view.messages,
-      friends:state?.tab==='chat'?view.peers:searching?friendState.players:friendState?.friends??[],blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
+      // Closed clans: the players who asked to join the player's clan (only a leader gets any), what is being answered, and the last error.
+      clanRequests:state?.joinRequests??[],clanRequestPending:state?.requestPending??null,clanRequestError:state?.requestError??'',
+      friends:friendList(),blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
+      unread:view.unread,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
       actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id),
         addFriend:id=>friendActions.action('send',id),cancelFriendRequest:(playerId,requestId)=>friendActions.action('cancel',requestId??outgoing.find(r=>r.playerId===playerId)?.id),
         setRole:(id,role)=>{const member=roster.find(m=>m.id===id),step=member&&roleStep(current,member.role,role);if(step)clanActions.manageMember(step,id);},
-        kick:id=>clanActions.manageMember('kick',id)}};
+        kick:id=>clanActions.manageMember('kick',id),
+        // Closed clans. join(id) asks a closed clan instead of joining it; the rest is for the leaders and the owner.
+        cancelJoinRequest:id=>clanActions.cancelJoinRequest(id),acceptJoinRequest:id=>clanActions.acceptRequest(id),declineJoinRequest:id=>clanActions.declineRequest(id),setJoinPolicy:policy=>clanActions.setJoinPolicy(policy),
+        // The panel shows a conversation with unread messages ('clan' or a friend's ID): tell Realtime it was read.
+        markRead:key=>chatActions.markRead(key)}};
   }
   const render=()=>renderer.update(current,data());
   // Members also needs Friends state: its panel offers Add friend / Cancel.
@@ -51,11 +81,16 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
   function boot() {
     state=undefined;friendState=undefined;chatState=undefined;
     renderer=createExperienceRenderer(host,{live,onSearch:q=>controller.search(q),onRetry:()=>controller.retry(),onFriendSearch:q=>friends.search(q),onFriendAction:(action,id)=>friends.action(action,id),onFriendRefresh:()=>friends.refresh(),onChatSelect:key=>chat.select(key),onChatSend:(key,body)=>chat.send(key,body),onChatRefresh:()=>chat.refresh()});
-    chat=createChatController({client:chatClient(sdk),isVisible:()=>doc.visibilityState!=='hidden',onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh({background:true}),onReconnect:()=>friends.refresh({background:true}),onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
-      if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
+    chat=createChatController({client:chatClient(sdk),isVisible:seen,onChange:next=>{chatState=next;render();},onNotification:()=>friends.refresh({background:true}),onReconnect:()=>{friends.refresh({background:true});controller.rosterChanged(state?.clan?.id);},onConfig:detail=>notify('config-updated',detail),onSuspend:()=>{notify('suspended',{code:4403});destroy();},onMembership:event=>{
+      // roster: a member line in the clan chat (TEAM-294). onReconnect reads the clan again too, for a change made
+      // while the socket was down, which no frame announced.
+      if(event.kind==='roster')controller.rosterChanged(event.clanId);
+      else if(event.kind==='clan_join_request')controller.requestsChanged(event.clanId);
+      else if(event.kind==='clan_join_declined')controller.joinRequestDeclined(event.clanId);
+      else if(['removed','clan_kicked','clan_disbanded'].includes(event.kind))controller.invalidateClan(event.clanId);
       else if(event.kind==='clan_joined'&&state?.clan?.id===event.clanId||['added','discovered','verify'].includes(event.kind)&&state?.clan?.id!==event.clanId)void controller.refreshMembership();
     }});
-    friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.forgetPeer(id);}});
+    friends=createFriendsController({sdk,clanPlayers:()=>(state?.members??[]).map(m=>m.id),onChange:next=>{friendState=next;if(next.status==='ready')chat.setBlockedPlayers(next.blocked.map(p=>p.id));render();},onMutation:(action,id)=>{if(action==='block'||action==='unblock')chat.setPlayerBlocked(id,action==='block');else if(action==='remove')chat.endFriendship(id);}});
     controller=createExperienceController({sdk,clanAdapter,enabled:current.clan?.enabled===true,resolveScreen:(screen,inClan)=>resolveScreen(current,screen,inClan),onChange:next=>{
       state=next;render();if(live){friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state.clan?.id);}
     },onEvent:notify});
@@ -65,20 +100,24 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       void controller.start();friends.setView(current.friends?.enabled===true,friendsActive());chat.configure(current,state?.clan?.id);
     }
   }
-  try {boot();container.append(host);reserveContainer(container);}
+  try {boot();container.append(host);reserveContainer(container);if(live)reportUnread(chatView(chatState,current,state?.clan).unread);}
   catch(error){controller?.destroy();friends?.destroy();chat?.destroy();renderer?.destroy();host.remove();throw error;}
   const unsubscribe=live?playerSession(sdk)?.subscribe(()=>{
     controller.destroy();friends.destroy();chat.destroy();renderer.destroy();boot();
   }):undefined;
   const visible=()=>{chat.markRead();if(doc.visibilityState!=='hidden')void friends.refresh({background:true});};
   if(live)doc.addEventListener('visibilitychange',visible);
-  function destroy(){if(destroyed)return;destroyed=true;unsubscribe?.();doc.removeEventListener('visibilitychange',visible);controller.destroy();friends.destroy();chat.destroy();renderer.destroy();host.remove();releaseContainer(container);}
+  // A game that keeps the widget mounted and hides its container: once it is shown again, what is on screen is read.
+  const View=doc.defaultView;
+  const resized=live&&typeof View?.ResizeObserver==='function'?new View.ResizeObserver(()=>{if(seen())chat.markRead();}):null;
+  resized?.observe(host);
+  function destroy(){if(destroyed)return;destroyed=true;unsubscribe?.();resized?.disconnect();doc.removeEventListener('visibilitychange',visible);controller.destroy();friends.destroy();chat.destroy();renderer.destroy();host.remove();releaseContainer(container);}
   return {
     updateConfig(next){
       if(destroyed)throw new Error('Cannot update a destroyed SDK widget.');
       const candidate=widgetConfig(next,{validate});renderer.update(candidate,data());current=candidate;
       if(live){
-        controller.setEnabled(current.clan?.enabled===true);controller.reconcile();
+        controller.setEnabled(current.clan?.enabled===true);controller.reconcile();controller.configChanged();
         if(state?.tab==='friends'&&current.friends?.enabled!==true||state?.tab==='clan'&&current.clan?.enabled!==true||state?.tab==='chat'&&current.chat?.enabled!==true)controller.tab(defaultTab());
         friends.setView(current.friends?.enabled===true,friendsActive());
         chat.configure(current,state?.clan?.id);

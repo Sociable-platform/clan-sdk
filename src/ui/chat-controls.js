@@ -1,13 +1,21 @@
 export function selectedChatKey(shadow,data,includeHidden=false) {
   if(!includeHidden&&shadow.querySelector('.sk-panel')?.hidden||!shadow.querySelector('[data-key="message"]'))return null;
   if(data.tab!=='chat')return data.tab==='clan'&&data.screen==='home'?'clan':null;
+  // @clan/ui 0.1.49+: the open conversation's header carries its key (a friend's ID).
+  const conversation=shadow.querySelector('[data-conversation]')?.getAttribute('data-conversation');
+  if(conversation!==undefined&&conversation!==null)return Object.hasOwn(data.chatRooms??{},conversation)?conversation:null;
+  // Older @clan/ui: one chip per conversation above it, the pressed one is open.
   const chips=[...shadow.querySelectorAll('.sk-chip')],index=chips.findIndex(el=>el.getAttribute('aria-pressed')==='true');
   return data.chatKeys?.[index]??null;
 }
 export function decorateChat(shadow,data) {
   const state=data.sdkState?.chat,key=selectedChatKey(shadow,data),room=data.chatRooms?.[key],history=state?.history[room];
-  const ready=state?.status==='connected'&&room&&!history?.loading&&!history?.error&&!state.pending&&!state.blocked?.[room]&&!(state.cooldownUntil>Date.now());
+  // A read-only DM (a block ended the friendship, TEAM-284): readable, but nothing can be written in it.
+  const conversation=state?.conversations?.find(c=>c.id===room),blockedByMe=Boolean(key&&state?.blockedPeers?.includes(key));
+  const readOnly=conversation?.kind==='dm'&&(conversation.readOnly===true||blockedByMe);
+  const ready=state?.status==='connected'&&room&&!readOnly&&!history?.loading&&!history?.error&&!state.pending&&!state.blocked?.[room]&&!(state.cooldownUntil>Date.now());
   const input=shadow.querySelector('[data-key="message"]');
+  if(input&&input.disabled!==readOnly)input.disabled=readOnly;
   const button=shadow.querySelector('.sk-composer button');
   // Seconds left of a slow mode or rate limit wait, when it is long enough to be worth counting down
   // (the controller decides: state.cooldownCountdown). 0 means: show the normal Send label.
@@ -19,10 +27,13 @@ export function decorateChat(shadow,data) {
     const label=wait>0?`${wait}s`:button.dataset.sdkLabel;
     // Only write a changed value: the renderer watches this tree, and an unconditional write would loop.
     if(button.textContent!==label)button.textContent=label;
-    const title=wait>0?`You can send again in ${wait}s`:ready?'Send message':'Messaging unavailable';
+    const title=wait>0?`You can send again in ${wait}s`:ready?'Send message':readOnly?'You can only message friends':'Messaging unavailable';
     if(button.title!==title)button.title=title;
   }
   let message=(data.tab==='clan'&&(data.sdkState?.leavePending?'Leaving clan…':data.sdkState?.leaveError))||state?.error||history?.error||state?.warning||'';
+  // One reason for every ended friendship (a removal or a block, either side): always true, and it does not depend on
+  // whether this tab has loaded the player's block list yet.
+  if(!message&&readOnly)message='You can only message friends.';
   if(!message)message=!state||state.status==='unavailable'?'Messaging is unavailable until transport is connected.':state.status==='connecting'?'Connecting to chat…':state.status!=='connected'?'Chat disconnected.':state.listLoading?'Loading conversations…':history?.loading?'Loading messages…':key&&!room?'No chat conversation is available for this clan.':!state.conversations.length?'No conversations yet.':room&&!data.threads?.[key]?.length?'No messages yet.':'';
   const status=shadow.querySelector('[data-sdk-status]');
   if(status){

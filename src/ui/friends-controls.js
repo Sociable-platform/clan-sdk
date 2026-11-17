@@ -12,20 +12,23 @@ export function decorateFriends(shadow,data,labels) {
     if(!button){button=doc.createElement('button');button.type='button';button.className='sk-btn sk-btn-ghost';parent.append(button);}
     button.dataset.friendAction=kind;button.dataset.friendId=id;
     text(button,state.pending?.action===kind&&state.pending.id===id?'Working…':label);
-    button.disabled=busy;button.setAttribute('aria-label',`${label} · ${parent.querySelector('.sk-friend-name')?.textContent??''}`);
+    const name=(parent.closest('.sk-row, .sk-friend')??parent).querySelector('.sk-friend-name')?.textContent??'';
+    button.disabled=busy;button.setAttribute('aria-label',`${label} · ${name}`);
   };
   const requests=data.requests??[];
+  // @clan/ui request row: picture, name and "Friend request" on the left, Accept and Decline on the right.
   shadow.querySelectorAll('.sk-content > .sk-row').forEach((row,index)=>{
     const request=requests[index];if(!request)return;
     const outgoing=request.direction==='outgoing';
-    const description=row.querySelector('.sk-friend-request');
-    if(outgoing&&description?.lastChild?.nodeType===3)text(description.lastChild,' · Request sent');
-    action(row,outgoing?'cancel':'accept',request.id,outgoing?labels.cancel:labels.accept,row.querySelector('button'));
+    const buttons=row.querySelector('.sk-request-actions')??row;
     if(outgoing){
-      // Shared UI renders an incoming-request Decline button by default.
-      row.querySelectorAll('button:not([data-friend-action="cancel"])').forEach(button=>button.remove());
+      text(row.querySelector('.sk-row-main .sk-desc'),'Request sent');
+      // Shared UI renders an incoming request's Accept and Decline; the sender only gets Cancel.
+      buttons.querySelectorAll('button:not([data-friend-action="cancel"])').forEach(button=>button.remove());
+      action(buttons,'cancel',request.id,labels.cancel);
     }else{
-      action(row,'decline',request.id,'Decline',row.querySelector('button:not([data-friend-action])'));
+      action(buttons,'accept',request.id,labels.accept,buttons.querySelector('.sk-btn-accept'));
+      action(buttons,'decline',request.id,'Decline',buttons.querySelector('.sk-btn-decline'));
     }
   });
   shadow.querySelectorAll('.sk-content > .sk-friend').forEach((row,index)=>{
@@ -41,14 +44,18 @@ export function decorateFriends(shadow,data,labels) {
     }
     if(!manageable)row.querySelector('.sk-member-panel')?.remove();
     row.querySelectorAll('.sk-member-panel button').forEach(button=>{button.disabled=busy;});
-    // The name/avatar selector is also a button; only hide the Chat action.
-    const chat=row.querySelector('.sk-friend-row > button.sk-btn');
+    // The name/avatar selector is also a button; only hide the Chat action, not the SDK's own.
+    const line=row.querySelector('.sk-friend-row')??row;
+    const chat=line.querySelector(':scope > button.sk-btn:not([data-friend-action])');
     if(chat)chat.hidden=player.relation!=='friend';
-    if(player.relation==='request_sent')action(row,'cancel',player.requestId,labels.cancel);
+    // Actions sit on the right of the player's line, like Chat. A single one (Add friend, Cancel, Unblock) keeps
+    // one width (@clan/ui's .sk-player), so Add friend and Cancel swap in place.
+    line.classList.toggle('sk-player',['none','request_sent','blocked'].includes(player.relation));
+    if(player.relation==='request_sent')action(line,'cancel',player.requestId,labels.cancel);
     else if(player.relation==='request_received'){
-      action(row,'accept',player.requestId,labels.accept);action(row,'decline',player.requestId,'Decline');
-    }else if(player.relation==='none')action(row,'send',player.id,'Add friend');
-    else if(player.relation==='blocked')action(row,'unblock',player.id,'Unblock');
+      action(line,'accept',player.requestId,labels.accept);action(line,'decline',player.requestId,'Decline');
+    }else if(player.relation==='none')action(line,'send',player.id,'Add friend');
+    else if(player.relation==='blocked')action(line,'unblock',player.id,'Unblock');
   });
   shadow.querySelectorAll('.sk-blocked-list button').forEach(button=>{button.disabled=busy;});
   const section=shadow.querySelector('.sk-content > .sk-section');

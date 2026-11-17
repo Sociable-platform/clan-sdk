@@ -39,17 +39,43 @@ export function registerFriendsTests({test,assert,container}) {
  }
  test('Friends-only widget bootstraps/list maps Social IDs, both directions and no fabricated presence',()=>fixture(async({mount,calls})=>{
   const cfg=config();cfg.texts.labels.accept='Approve';cfg.texts.labels.cancel='Undo';const {root}=mount(cfg);await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
-  assert(calls[0].url.endsWith('/players/me')&&calls.length===4,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('.sk-friend-select').dataset.key===`friend-${friend.id}`,'Wrong friend identity');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
+  assert(calls[0].url.endsWith('/players/me')&&calls.length===4,'Wrong bootstrap/reads');assert(root.textContent.includes('Aysel')&&root.textContent.includes('Murad')&&root.textContent.includes('Request sent'),'Missing lists');assert(root.querySelector('[data-friend-action="accept"]').textContent==='Approve'&&root.querySelector('[data-friend-action="decline"]').textContent==='Decline'&&root.querySelector('[data-friend-action="cancel"]').textContent==='Undo','Configured action labels ignored');assert(root.querySelector('[data-friend-action="accept"]').dataset.friendId===incoming.id,'Accept used player ID');assert(root.querySelector('[data-friend-action="cancel"]').dataset.friendId===outgoing.id,'Cancel used player ID');assert(root.querySelector('.sk-friend-select').dataset.key===`friend-${friend.id}`,'Wrong friend identity');assert(!root.querySelector('.sk-presence'),'Invented online state');assert(!root.textContent.includes('Friends service is unavailable'),'Old unavailable placeholder');
   assert(!root.querySelector('[data-friend-action="remove"], [data-friend-refresh]')&&!root.textContent.includes('Refresh friends'),'Standalone action added');
   assert(root.querySelector('.sk-friend').children.length===1&&!root.querySelector('.sk-member-panel'),'Closed menu leaves an extra row');
   assert(!root.querySelector('[data-sdk-status]'),'Empty status leaves extra spacing');
  }));
+ test('Friends list shows each friend\'s clan under the name, and no line without one',()=>fixture(async({mount,store})=>{
+  const other={id:'44444444-4444-4444-8444-444444444444',displayName:'Clanless',since:friend.since,clan:null};
+  store.friends=[{...friend,clan:{id:'55555555-5555-4555-8555-555555555555',name:'Wolves'}},other,{...friend,id:'66666666-6666-4666-8666-666666666666',displayName:'Old Backend'}];
+  const {root}=mount(config());await waitFor(()=>root.querySelectorAll('.sk-friend-select:not(:disabled)').length===3);
+  const line=id=>root.querySelector(`[data-key="friend-${id}"] .sk-row-main .sk-desc`);
+  assert(line(friend.id)?.textContent==='Wolves'&&line(friend.id).getBoundingClientRect().height>0,'Friend clan not shown under the name');
+  assert(!line(other.id)&&!line('66666666-6666-4666-8666-666666666666'),'Clan line shown for a friend in no clan');
+ }));
  test('Friends search sends debounced server q, Add sends Social playerId then refreshes requests/search',()=>fixture(async({mount,calls})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));type(root,'player-search','New & Player');await waitFor(()=>root.querySelector('[data-friend-action="send"]'));
   assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
-  root.querySelector('[data-friend-action="send"]').click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
+  const sendButton=root.querySelector('[data-friend-action="send"]');
+  assert(sendButton.parentElement.matches('.sk-friend-row')&&sendButton.getBoundingClientRect().left>root.querySelector('.sk-content > .sk-friend .sk-friend-name').getBoundingClientRect().right,'Add friend is not on the right of the player');
+  assert(sendButton.textContent==='Add friend','Wrong Add friend label');
+  sendButton.click();await waitFor(()=>root.querySelector('[data-friend-action="cancel"]')&&!root.querySelector('[data-friend-action="send"]'));
   assertPlayerRow(root.querySelector('.sk-content > .sk-friend'),stranger.displayName,false);
+  const cancelButton=root.querySelector('.sk-content > .sk-friend [data-friend-action="cancel"]');
+  assert(cancelButton.parentElement.matches('.sk-friend-row')&&cancelButton.textContent==='Cancel','Cancel did not replace Add friend on the right');
   const post=calls.find(c=>c.method==='POST');assert(post.body===JSON.stringify({playerId:stranger.id}),'Wrong namespace/body');assert(calls.some(c=>c.url.endsWith('?q=New+%26+Player')),'Search query not encoded');assert(calls.filter(c=>c.url.endsWith('/friends/requests')&&c.method==='GET').length===2,'Requests not refreshed');
+ }));
+ test('Friends search that finds a screen full of players stays at the top, on the search box',()=>fixture(async({mount,store})=>{
+  // A short list sits "at its end"; the long one the search brings must not scroll the panel to its last player.
+  store.players=Array.from({length:30},(_,i)=>({id:`33333333-3333-4333-8333-${String(i).padStart(12,'0')}`,displayName:`Ali ${i}`,relation:'none'}));
+  const {root}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
+  const content=root.querySelector('[data-key="content"]');
+  assert(content.scrollHeight<=content.clientHeight+32,'The list before the search already fills the panel');
+  root.querySelector('[data-key="player-search"]').focus();type(root,'player-search','Ali');
+  await waitFor(()=>root.querySelectorAll('[data-friend-action="send"]').length===30);await sleep(50);
+  const after=root.querySelector('[data-key="content"]');
+  assert(after.scrollHeight>after.clientHeight,'The search results do not overflow the panel');
+  assert(after.scrollTop===0,`The panel scrolled to ${after.scrollTop} instead of staying at the top`);
+  assert(root.activeElement?.getAttribute('data-key')==='player-search','The search box lost focus');
  }));
  test('Outgoing requests only offer Cancel while incoming requests offer Accept and Decline',()=>fixture(async({mount})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="cancel"]'));
@@ -83,7 +109,7 @@ export function registerFriendsTests({test,assert,container}) {
   assert(rows[3].querySelector('[data-friend-action="cancel"]'),'Missing outgoing request action');
   cfg.chat.directMessages=false;handle.updateConfig(cfg);
   root.querySelectorAll('.sk-content > .sk-friend').forEach(row=>{
-   assert(!row.querySelector('.sk-friend-row > .sk-btn'),'Chat rendered with direct messages disabled');
+   assert(!row.querySelector('.sk-friend-row > .sk-btn:not([data-friend-action])'),'Chat rendered with direct messages disabled');
    assert(row.querySelector('.sk-friend-name').getBoundingClientRect().width>0,'Disabling Chat hid player identity');
   });
  }));
@@ -107,7 +133,7 @@ export function registerFriendsTests({test,assert,container}) {
   await waitFor(()=>root.querySelector('.sk-section').textContent==='Friends · 0'&&!root.textContent.includes('Loading friends'));
   const writes=calls.filter(c=>c.method==='DELETE');
   assert(writes.length===1&&writes[0].url.endsWith(`/friends/${friend.id}`)&&writes[0].body===undefined,'Wrong/duplicate Remove request');
-  assert(!root.querySelector('.sk-friend, .sk-member-panel, [data-friend-refresh]')&&root.querySelector('[data-key="player-search"]')&&root.querySelector('[data-key="blocked-toggle"]'),'Removed rows remain or persistent controls missing');
+  assert(!root.querySelector('.sk-friend, .sk-member-panel, [data-friend-refresh]')&&root.querySelector('[data-key="player-search"]')&&!root.querySelector('[data-key="blocked-toggle"]'),'Removed rows remain or persistent controls missing');
  }));
  test('returning to the visible game reloads friends/counts automatically and destroy removes that listener',()=>fixture(async({mount,store,calls})=>{
   const {root,handle}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));

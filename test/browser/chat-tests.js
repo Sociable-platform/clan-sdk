@@ -1,7 +1,7 @@
 // Mock protocol integration in a real browser. DTO shapes/events follow
 // openapi/realtime.yaml and realtime-ws.md; these identities/messages are test-only.
 import {init} from '/src/index.js';
-import {currentConfig,sharedRoot,json,waitFor,type,sleep,deferred} from './helpers.js';
+import {currentConfig,sharedRoot,json,waitFor,type,sleep,deferred,openDm} from './helpers.js';
 const me='7f1e0c2a-5b3d-4e8f-9a10-2b3c4d5e6f70',peer='5a2b3c4d-1e2f-4a3b-8c9d-0e1f2a3b4c5d';
 const room={id:'0193a6b4-7c1e-7d2a-9f10-2b3c4d5e6f70',kind:'dm',clanId:null,members:[{id:me,name:'Ali',online:true},{id:peer,name:'Rashad',online:true}],lastMessage:null,unread:0};
 const message=(id,body,senderId=peer)=>({id,body,senderId,senderName:senderId===me?'Ali':'Rashad',createdAt:'2026-11-09T18:20:00Z'});
@@ -24,11 +24,11 @@ export function registerChatTests({test,assert,container}) {
   };
   const sdk=init({socialUrl:'https://social.test',realtimeUrl:'https://realtime.test',getPlayerToken:async()=> 'test-token'});
   const mount=(cfg=config())=>{const target=container(),handle=sdk.mountExperience({container:target,config:cfg});handles.push(handle);return {target,handle,root:sharedRoot(target)};};
-  const ready=async mounted=>{await waitFor(()=>sockets.length);sockets.at(-1).hello();await waitFor(()=>mounted.root.querySelector('[data-key="message"]')&&!mounted.root.textContent.includes('Loading messages'));};
+  const ready=async mounted=>{await waitFor(()=>sockets.length);sockets.at(-1).hello();await openDm(mounted.root);await waitFor(()=>mounted.root.querySelector('[data-key="message"]')&&!mounted.root.textContent.includes('Loading messages'));};
   try{await run({sdk,mount,ready,sockets,calls,messages});}finally{handles.forEach(h=>h.destroy());window.fetch=oldFetch;window.WebSocket=oldSocket;}
  }
  test('live Chat waits for hello, loads actual conversation/history and incoming frames repaint immediately',()=>fixture(async({mount,sockets,calls})=>{
-  const a=mount();await waitFor(()=>sockets.length);assert(a.root.textContent.includes('Connecting'),'Socket open treated as authentication');sockets[0].hello();await waitFor(()=>a.root.textContent.includes('No messages yet'));
+  const a=mount();await waitFor(()=>sockets.length);assert(a.root.textContent.includes('Connecting'),'Socket open treated as authentication');sockets[0].hello();await openDm(a.root);await waitFor(()=>a.root.textContent.includes('No messages yet'));
   assert(!a.root.querySelector('[data-chat-action]'),'SDK injected extra chat buttons');assert(calls.some(c=>c.url.includes('/'+room.id+'/messages')),'History used peer ID');
   sockets[0].frame('message.new',{conversationId:room.id,message:message('live','Immediate live message')});await waitFor(()=>a.root.textContent.includes('Immediate live message'));assert(a.root.querySelectorAll('.sk-msg').length===1,'Incoming message duplicated');sockets[0].frame('message.new',{conversationId:room.id,message:message('mine','Authenticated own message',me)});await waitFor(()=>a.root.querySelector('[data-mine="true"] .sk-bubble')?.textContent==='Authenticated own message');assert(a.root.querySelectorAll('.sk-msg').length===2,'Authenticated player ID did not classify own messages');
  }));
@@ -51,19 +51,20 @@ export function registerChatTests({test,assert,container}) {
   a.root.querySelector('.sk-composer button').click();const second=ws.sent.filter(f=>f.type==='message.send').at(-1),stored=message('stored','Final server body',me);messages.push(stored);ws.frame('message.ack',{replyTo:second.id,messageId:stored.id,createdAt:stored.createdAt});ws.frame('message.new',{conversationId:room.id,message:stored});
   await waitFor(()=>a.root.querySelector('[data-key="message"]').value==='');assert(a.root.querySelectorAll('.sk-msg').length===1&&a.root.textContent.includes('Final server body'),'ACK/broadcast/history duplicated or fabricated body');
  }));
- test('long DM histories keep friend chips and the composer visible while messages scroll independently',()=>{
+ test('long DM histories keep the conversation header and composer visible, and the list switches rooms',()=>{
   const other={...room,id:'room-other',members:[room.members[0],{id:'peer-other',name:'Leyla',online:false}]};
   return fixture(async({mount,ready,messages,calls})=>{
    messages.push(...Array.from({length:100},(_,i)=>message(`history-${String(i).padStart(3,'0')}`,`History message ${i}`)));
    const a=mount();await ready(a);await waitFor(()=>a.root.querySelectorAll('.sk-msg').length===100);
-   const chips=a.root.querySelector('.sk-chips'),chat=a.root.querySelector('.sk-chat'),panel=a.root.querySelector('.sk-panel'),composer=a.root.querySelector('.sk-composer');
-   const row=chips.getBoundingClientRect(),box=panel.getBoundingClientRect(),input=composer.getBoundingClientRect();
-   assert(row.height>=30,'Friend selector collapsed under long history');
-   assert(row.top>=box.top&&row.bottom<=box.bottom,'Friend selector clipped outside panel');
+   const header=a.root.querySelector('[data-conversation]'),chat=a.root.querySelector('.sk-chat'),panel=a.root.querySelector('.sk-panel'),composer=a.root.querySelector('.sk-composer');
+   const row=header.getBoundingClientRect(),box=panel.getBoundingClientRect(),input=composer.getBoundingClientRect();
+   assert(row.height>=30,'Conversation header collapsed under long history');
+   assert(row.top>=box.top&&row.bottom<=box.bottom,'Conversation header clipped outside panel');
    assert(chat.scrollHeight>chat.clientHeight,'Message history does not scroll independently');
    assert(input.top>=box.top&&input.bottom<=box.bottom,'Composer clipped outside panel');
-   const names=[...chips.querySelectorAll('.sk-chip')];assert(names.map(node=>node.textContent).join(',')==='Rashad,Leyla','DM peers missing');
-   names[1].click();await waitFor(()=>a.root.textContent.includes('Other DM history'));
+   a.root.querySelector('[aria-label="Back to conversations"]').click();
+   const names=[...a.root.querySelectorAll('.sk-convo .sk-friend-name')];assert(names.map(node=>node.textContent).join(',')==='Rashad,Leyla','DM peers missing');
+   await openDm(a.root,'peer-other');await waitFor(()=>a.root.textContent.includes('Other DM history'));
    assert(calls.some(call=>call.url.includes('/room-other/messages')),'Friend selection requested the wrong conversation');
   },url=>url.endsWith('/conversations')?json({conversations:[room,other]}):url.includes('/room-other/messages')?json({messages:[{...message('other','Other DM history'),senderId:'peer-other',senderName:'Leyla'}],hasMore:false}):undefined);
  });
@@ -80,12 +81,12 @@ export function registerChatTests({test,assert,container}) {
   messages.push(message('missed','Recovered from history'));a.handle.reconnectChat();await waitFor(()=>sockets.length===2);sockets[1].hello();await waitFor(()=>a.root.textContent.includes('Recovered from history'));assert(a.root.querySelector('[data-key="message"]').value==='Uncertain send'&&!sockets[1].sent.some(f=>f.type==='message.send'),'Reconnect lost/replayed draft');
  }));
  test('live Chat instances stay independent; session reset detaches old socket/DOM and destroy cleans up',()=>fixture(async({sdk,mount,ready,sockets})=>{
-  const a=mount();await ready(a);const b=mount();await waitFor(()=>sockets.length===2);sockets[1].hello();await waitFor(()=>b.root.querySelector('[data-key="message"]'));
+  const a=mount();await ready(a);const b=mount();await waitFor(()=>sockets.length===2);sockets[1].hello();await openDm(b.root);await waitFor(()=>b.root.querySelector('[data-key="message"]'));
   type(a.root,'message','Only A');assert(b.root.querySelector('[data-key="message"]').value==='','Draft leaked');const old=sockets[0].onmessage;
   sdk.resetPlayerSession();await waitFor(()=>sockets.length===4);assert(sockets[0].closed&&sockets[1].closed,'Session did not close sockets');old({data:JSON.stringify({type:'message.new',game_id:'game',data:{conversationId:room.id,message:message('old','Old player data')}})});
-  sockets[2].hello();sockets[3].hello();await waitFor(()=>sharedRoot(a.target).querySelector('[data-key="message"]'));assert(!sharedRoot(a.target).textContent.includes('Old player data')&&sharedRoot(a.target).querySelector('[data-key="message"]').value==='','Previous session leaked');a.handle.destroy();assert(!sharedRoot(a.target)&&sharedRoot(b.target)&&sockets[2].closed,'Destroy leaked or affected other widget');
+  sockets[2].hello();sockets[3].hello();await openDm(sharedRoot(a.target));await waitFor(()=>sharedRoot(a.target).querySelector('[data-key="message"]'));assert(!sharedRoot(a.target).textContent.includes('Old player data')&&sharedRoot(a.target).querySelector('[data-key="message"]').value==='','Previous session leaked');a.handle.destroy();assert(!sharedRoot(a.target)&&sharedRoot(b.target)&&sockets[2].closed,'Destroy leaked or affected other widget');
  }));
  test('live Chat destroy during pending history cannot recreate DOM',()=>{const pending=deferred();return fixture(async({mount,sockets,calls})=>{
-  const a=mount();await waitFor(()=>sockets.length);sockets[0].hello();await waitFor(()=>calls.some(c=>c.url.includes('/messages')));a.handle.destroy();pending.resolve(json({messages:[message('late','Late message')],hasMore:false}));await sleep(20);assert(!sharedRoot(a.target)&&sockets[0].closed,'Late history mounted destroyed widget');
+  const a=mount();await waitFor(()=>sockets.length);sockets[0].hello();await openDm(a.root);await waitFor(()=>calls.some(c=>c.url.includes('/messages')));a.handle.destroy();pending.resolve(json({messages:[message('late','Late message')],hasMore:false}));await sleep(20);assert(!sharedRoot(a.target)&&sockets[0].closed,'Late history mounted destroyed widget');
  },url=>url.includes('/messages')?pending.promise:undefined);});
 }

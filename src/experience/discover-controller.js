@@ -28,12 +28,22 @@ export function clanViewModels(value) {
       if (typeof item.canJoin !== 'boolean') throw new TypeError('Invalid canJoin.');
       result.canJoin = item.canJoin;
     }
+    // A closed clan takes a request, not a join; requested: the player already asked this clan.
+    if (item.joinPolicy !== undefined) {
+      if (!['open', 'closed'].includes(item.joinPolicy)) throw new TypeError('Invalid joinPolicy.');
+      result.joinPolicy = item.joinPolicy;
+    }
+    if (item.requested !== undefined) {
+      if (typeof item.requested !== 'boolean') throw new TypeError('Invalid requested.');
+      result.requested = item.requested;
+    }
     return Object.freeze(result);
   });
 }
+const markRequested = (clans, id, requested) => clans.map(c => (c.id === id ? Object.freeze({ ...c, requested }) : c));
 export const isFull = clan => clan.memberCount !== undefined && clan.maxMembers !== undefined && clan.memberCount >= clan.maxMembers;
 
-export function createDiscoverController({ listClans, joinClan, clanAdapter, onChange, onNavigate, onJoined, debounceMs = 250, enabled = true }) {
+export function createDiscoverController({ listClans, joinClan, requestJoin, cancelRequest, clanAdapter, onChange, onNavigate, onJoined, onRequested = () => {}, debounceMs = 250, enabled = true }) {
   let state = { screen: 'discover', query: '', status: 'idle', clans: [], error: '', joinError: '', pendingJoin: null, joinedClanId: null };
   let dead = false;
   let revision = 0;
@@ -58,7 +68,7 @@ export function createDiscoverController({ listClans, joinClan, clanAdapter, onC
     }
     emit();
   }
-  return {
+  const api = {
     reset() { invalidate();visit++;enabled=false;state={screen:'create',query:'',status:'idle',clans:[],error:'',joinError:'',pendingJoin:null,joinedClanId:null};emit(); },
     start: load,
     retry: load,
@@ -84,10 +94,57 @@ export function createDiscoverController({ listClans, joinClan, clanAdapter, onC
       onNavigate({ screen, previousScreen });
       if (screen === 'discover') void load();
     },
+    // A request to join a closed clan: the clan stays in the list, marked `requested`, until a leader decides. A leader
+    // who accepts makes the player a member (Realtime tells this player); a decline clears the mark (see refresh).
+    async requestToJoin(clan) {
+      const currentVisit = visit;
+      state = { ...state, pendingJoin: clan.id, joinError: '' };
+      emit();
+      try {
+        await requestJoin(clan.id);
+        if (dead || currentVisit !== visit) { if (!dead) { state = { ...state, pendingJoin: null }; emit(); } return; }
+        state = { ...state, pendingJoin: null, clans: markRequested(state.clans, clan.id, true) };
+        emit();
+        onRequested({ clanId: clan.id });
+      } catch (error) {
+        if (dead) return;
+        // The answer tells what changed under the player: they already asked, or the clan opened meanwhile.
+        const clans = error?.code === 'already_requested' ? markRequested(state.clans, clan.id, true) : state.clans;
+        state = { ...state, pendingJoin: null, clans, joinError: currentVisit === visit ? error?.message || 'Could not send the request.' : '' };
+        emit();
+        if (error?.code === 'clan_open' || error?.code === 'clan_full') void load();
+      }
+    },
+    async cancelRequest(id) {
+      if (dead || !enabled || state.screen !== 'discover' || state.pendingJoin) return;
+      const clan = state.clans.find(item => item.id === id);
+      if (!clan || clan.requested !== true || typeof cancelRequest !== 'function') return;
+      const currentVisit = visit;
+      state = { ...state, pendingJoin: id, joinError: '' };
+      emit();
+      try {
+        await cancelRequest(id);
+      } catch (error) {
+        if (dead) return;
+        // Already gone (a leader decided first): the mark is wrong either way.
+        if (error?.code !== 'request_not_found') {
+          state = { ...state, pendingJoin: null, joinError: currentVisit === visit ? error?.message || 'Could not take the request back.' : '' };
+          emit();
+          return;
+        }
+      }
+      if (dead) return;
+      state = { ...state, pendingJoin: null, clans: markRequested(state.clans, id, false) };
+      emit();
+    },
     async join(id) {
       if (dead || !enabled || state.screen !== 'discover' || state.status !== 'ready' || state.pendingJoin || state.joinedClanId) return;
       const clan = state.clans.find(item => item.id === id);
       if (!clan || clan.canJoin === false || isFull(clan)) return;
+      if (clan.joinPolicy === 'closed') {
+        if (clan.requested !== true && typeof requestJoin === 'function') await api.requestToJoin(clan);
+        return;
+      }
       const currentVisit = visit;
       state = { ...state, pendingJoin: id, joinError: '' };
       emit();
@@ -110,4 +167,5 @@ export function createDiscoverController({ listClans, joinClan, clanAdapter, onC
     },
     destroy() { dead = true; invalidate(); visit += 1; },
   };
+  return api;
 }

@@ -43,13 +43,13 @@ export function init(options) {
       const query = q === undefined ? '' : `?${new URLSearchParams({ q })}`;
       return request(`/api/v1/clans${query}`);
     },
-    createClan({ name, badge, description, tag } = {}) {
+    createClan({ name, badge, description, tag, joinPolicy } = {}) {
       if (typeof name !== 'string') {
         throw new TypeError('name must be a string.');
       }
       // Name length/uniqueness remain server rules; do not add UI validation here.
       const body={name};
-      for(const [field,value]of Object.entries({badge,description,tag})){
+      for(const [field,value]of Object.entries({badge,description,tag,joinPolicy})){
         if(value===undefined)continue;
         if(typeof value!=='string')throw new TypeError(`${field} must be a string.`);
         body[field]=value;
@@ -71,7 +71,14 @@ export function init(options) {
   internals.set(client,{session,acquire,getPlayerToken,friends:createFriendsClient(request),leaveClan:id=>request(`/api/v1/clans/${encodeClanId(id)}/leave`,{method:'POST'}),
     kickClanMember:(clanId,playerId)=>request(member(clanId,playerId),{method:'DELETE'}),
     promoteClanMember:(clanId,playerId)=>request(member(clanId,playerId,'/promote'),{method:'POST'}),
-    demoteClanMember:(clanId,playerId)=>request(member(clanId,playerId,'/demote'),{method:'POST'})});
+    demoteClanMember:(clanId,playerId)=>request(member(clanId,playerId,'/demote'),{method:'POST'}),
+    // Closed clans: a player asks, a leader decides. The server decides who may; these only carry the calls.
+    requestClanJoin:clanId=>request(`/api/v1/clans/${encodeClanId(clanId)}/requests`,{method:'POST'}),
+    cancelClanJoinRequest:clanId=>request(`/api/v1/clans/${encodeClanId(clanId)}/requests/me`,{method:'DELETE'}),
+    listClanJoinRequests:clanId=>request(`/api/v1/clans/${encodeClanId(clanId)}/requests`),
+    acceptClanJoinRequest:(clanId,requestId)=>request(`/api/v1/clans/${encodeClanId(clanId)}/requests/${encodeId(requestId,'requestId')}/accept`,{method:'POST'}),
+    declineClanJoinRequest:(clanId,requestId)=>request(`/api/v1/clans/${encodeClanId(clanId)}/requests/${encodeId(requestId,'requestId')}/decline`,{method:'POST'}),
+    setClanJoinPolicy:(clanId,joinPolicy)=>request(`/api/v1/clans/${encodeClanId(clanId)}`,{method:'PATCH',body:{joinPolicy}})});
   return client;
 }
 
