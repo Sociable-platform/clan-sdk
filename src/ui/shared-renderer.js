@@ -205,8 +205,11 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       // Purge through the shared input hook when the next composer is rendered.
       if(live&&(draftClan&&(draftClan!==nextData.clan?.id||nextConfig.chat?.enabled!==true||nextConfig.chat?.clanChat!==true)||draftRoom&&nextData.sdkState?.chat?.status==='connected'&&!nextData.sdkState.chat.listLoading&&!Object.values(nextData.chatRooms??{}).includes(draftRoom))){purgeDraft=true;draftRoom=undefined;draftClan=undefined;}
       const active = shadow?.activeElement;
+      // Only a view with a chat keeps its content pinned to the end (the composer stays in sight). Any other view, such
+      // as Friends search results, stays where the player is: a short list "at its end" must not jump to the last row
+      // once a long list comes in.
       const scroller=shadow?.querySelector('[data-key="content"]');
-      const follow=scroller&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<32;
+      const follow=Boolean(scroller?.querySelector('[data-key="chat"]'))&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<32;
       const selection = active?.dataset.key && typeof active.selectionStart === 'number'
         ? {key:active.dataset.key, start:active.selectionStart, end:active.selectionEnd, direction:active.selectionDirection} : null;
       config = nextConfig; data = nextData; fonts.update(config);
@@ -224,7 +227,7 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         observer.observe(shadow, {childList:true, subtree:true});
       } else handle.update(config, data);
       decorate();
-      if(follow){const next=shadow.querySelector('[data-key="content"]');if(next)next.scrollTop=next.scrollHeight;}
+      if(follow){const next=shadow.querySelector('[data-key="content"]');if(next?.querySelector('[data-key="chat"]'))next.scrollTop=next.scrollHeight;}
       if (selection) {
         const input = [...shadow.querySelectorAll('[data-key]')].find(node => node.dataset.key === selection.key);
         if (input && shadow.activeElement === input) input.setSelectionRange(selection.start, selection.end, selection.direction);

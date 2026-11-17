@@ -64,6 +64,19 @@ export function registerFriendsTests({test,assert,container}) {
   assert(cancelButton.parentElement.matches('.sk-friend-row')&&cancelButton.textContent==='Cancel','Cancel did not replace Add friend on the right');
   const post=calls.find(c=>c.method==='POST');assert(post.body===JSON.stringify({playerId:stranger.id}),'Wrong namespace/body');assert(calls.some(c=>c.url.endsWith('?q=New+%26+Player')),'Search query not encoded');assert(calls.filter(c=>c.url.endsWith('/friends/requests')&&c.method==='GET').length===2,'Requests not refreshed');
  }));
+ test('Friends search that finds a screen full of players stays at the top, on the search box',()=>fixture(async({mount,store})=>{
+  // A short list sits "at its end"; the long one the search brings must not scroll the panel to its last player.
+  store.players=Array.from({length:30},(_,i)=>({id:`33333333-3333-4333-8333-${String(i).padStart(12,'0')}`,displayName:`Ali ${i}`,relation:'none'}));
+  const {root}=mount(config());await waitFor(()=>root.querySelector('.sk-friend-select:not(:disabled)'));
+  const content=root.querySelector('[data-key="content"]');
+  assert(content.scrollHeight<=content.clientHeight+32,'The list before the search already fills the panel');
+  root.querySelector('[data-key="player-search"]').focus();type(root,'player-search','Ali');
+  await waitFor(()=>root.querySelectorAll('[data-friend-action="send"]').length===30);await sleep(50);
+  const after=root.querySelector('[data-key="content"]');
+  assert(after.scrollHeight>after.clientHeight,'The search results do not overflow the panel');
+  assert(after.scrollTop===0,`The panel scrolled to ${after.scrollTop} instead of staying at the top`);
+  assert(root.activeElement?.getAttribute('data-key')==='player-search','The search box lost focus');
+ }));
  test('Outgoing requests only offer Cancel while incoming requests offer Accept and Decline',()=>fixture(async({mount})=>{
   const {root}=mount(config());await waitFor(()=>root.querySelector('[data-friend-action="cancel"]'));
   const outgoingRow=root.querySelector('[data-friend-action="cancel"]').closest('.sk-row');
