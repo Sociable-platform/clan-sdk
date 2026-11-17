@@ -56,7 +56,6 @@ message history. The SDK reads the open header's `data-conversation` hook to
 route history, read receipts and sends to the correct Realtime conversation.
 The Blocked section is hidden when empty. The current Create form has no tag
 input; the low-level `createClan({tag})` option remains for existing integrations.
-See [migration results](REGISTRY-MIGRATION.md) for clean-install verification.
 
 `npm run build` is the canonical build command. It uses esbuild and produces
 `dist/clan-sdk.js` (classic script/IIFE) and `dist/clan-sdk.esm.js` (ES module).
@@ -104,7 +103,7 @@ appropriate for branch policy. It must be available to any publishing job you
 start. The Docker build receives it only through a BuildKit secret. Do not echo
 it or enable shell tracing around credentials.
 
-`npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock. Actual current results are in [shared renderer notes](docs/shared-renderer.md).
+`npm test` uses Node's built-in runner and recording fake fetch. It never contacts a backend. Browser tests distinguish synthetic Social/Platform responses from the real HTTP request to the development-only config mock.
 
 ## Docker asset server
 
@@ -173,7 +172,7 @@ year. Until releases are versioned, games use `/v1/` only and the pinned path is
 documented to developers.
 
 The `images` CI job follows the team's Docker 27/DinD + buildx TLS-context setup:
-automatic on `develop`/`main`, manual on merge request pipelines. It publishes one
+automatic on `main` only (nothing is built from `develop`), manual on merge request pipelines. It publishes one
 multi-platform image for `linux/amd64,linux/arm64` with the full commit SHA tag:
 `$CI_REGISTRY_IMAGE/sdk:$CI_COMMIT_SHA`, resolving in this project to
 `<registry>/clan-platform/clan-sdk/sdk:<sha>`. Login uses `CI_REGISTRY_USER`,
@@ -421,7 +420,7 @@ Platform/Social are real. No key/token is logged or shipped in the SDK.
 5. Members → `clanMembers(id)` plus a fresh `myClan` read; map `playerId/displayName/role` to shared rows. The viewer is matched only by the confirmed Social UUID from `getMyPlayer` (Friends enabled) or the Realtime hello, never guessed. Header role comes from `myClan`.
 6. Friends and incoming/outgoing requests use the confirmed Friends API described below. With `realtimeUrl`, chat uses real room/history/send/incoming contracts described below; without it, unavailable drafts remain intact. Leave and member promote/demote/kick are integrated as described below. Config cannot grant backend permissions.
 
-The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency; see [integration gaps](docs/integration-gaps.md). No live service success or deployed-build SHA is implied by mock tests.
+The bridge currently uses documented-in-source `.sk-*`/`data-key` hooks for async search/status, per-row runtime capacities and unavailable actions. This keeps all markup/styles in the canonical package, but those hooks are a frontend API dependency. No live service success or deployed-build SHA is implied by mock tests.
 
 ## Friends API and shared UI
 
@@ -487,8 +486,7 @@ built output with mocked services**, plus a separate live built-ESM browser chec
 with two disposable players against local Social/Realtime. Block/unblock,
 reload persistence, both players' friendship/DM state, rejected messages in both
 directions and explicit re-friending passed. That original run used SDK **0.1.1**
-with published `@clan/ui` **0.1.30**; the current release is listed above. See
-[TEAM-250 results](TEAM-250.md) for contracts and the opt-in live command.
+with published `@clan/ui` **0.1.30**; the current release is listed above.
 
 **Player-session changes:** keep token renewal bound to the same player. When your host switches accounts, first change the callback's current-player source and immediately call `sdk.resetPlayerSession()` in the same synchronous host operation (or destroy widgets and create a new SDK). Reset invalidates pending authenticated responses and token callbacks, destroys old UI state/drafts/controllers, and restarts each SDK-owned widget with the new callback. Widgets on another SDK instance are unaffected. No JWT is decoded and token rotation alone does not mean an account switch. To change games or service settings, create a new SDK with the new initialization options. A request already committed by Social cannot be undone; its old UI result is ignored.
 
@@ -497,7 +495,7 @@ currentPlayer = nextPlayer; // your callback reads this host-owned source
 sdk.resetPlayerSession();
 ```
 
-Verification: **225 Node tests**, **70 real-browser mock tests**, and **8 live PASS groups** against local Social with two isolated dedicated test players (includes relationship cleanup). No FAIL/BLOCKED live operations in that run. This verifies the HTTP SDK against the running service, not its deployed SHA, browser CORS, Platform token exchange or websocket delivery. The Node-only runner used the existing local development signing key in memory and logged no tokens; dedicated player records remain, relationships were removed. See [Friends report](docs/friends-integration.md) for exact source revisions, limitations and changed files.
+Verification: **225 Node tests**, **70 real-browser mock tests**, and **8 live PASS groups** against local Social with two isolated dedicated test players (includes relationship cleanup). No FAIL/BLOCKED live operations in that run. This verifies the HTTP SDK against the running service, not its deployed SHA, browser CORS, Platform token exchange or websocket delivery. The Node-only runner used the existing local development signing key in memory and logged no tokens; dedicated player records remain, relationships were removed.
 
 Run mock tests with `npm test` and `npm run test:browser`. Live tests are **opt-in**, never part of npm test: `node test/live/friends.js --local-dev-key` requires an explicitly supplied `FRIENDS_LIVE_DEV_KEY` external development signing-key path. Alternatively provide `FRIENDS_LIVE_SOCIAL_URL`, `FRIENDS_LIVE_DEDICATED=1`, `FRIENDS_LIVE_TOKEN_A/B` as environment variables for two dedicated players whose external IDs start with `sdk-friends-test-`; run without the flag. The opt-in live Chat fixture requires `LIVE_CHAT_DEV_KEY` and running development services. No backend checkout or development key is needed for SDK installation, normal tests or preview. Tokens and keys are never printed. Do not use real player accounts for this relationship lifecycle test.
 
@@ -574,8 +572,6 @@ browser memory, using the game backend's `expiresIn` (seconds) / `expiresAt`
 TTLs), it refreshes; there is no background polling or token persistence. A forced
 refresh bypasses that cache and supersedes older pending acquisition. Auth
 transitions clear the cache at both boundaries and block acquisition in between.
-See [token optimization report](docs/token-optimization.md) for game integration,
-source selection and actual test/build results.
 
 ## Live chat
 
@@ -630,9 +626,6 @@ the loaded publication version (not schemaVersion), coalesce duplicate notices,
 and refresh through the existing loader/cache after0–500ms jitter with stale guards;
 direct-config hosts may handle this event themselves. No polling is added.
 
-See [live chat integration](docs/live-chat-integration.md) for inspected revisions,
-changed files, automated results, the real two-player browser check and its limits.
-
 ## Leave clan (TEAM-214)
 
 ```js
@@ -663,8 +656,6 @@ HTTP requests are not undone. Backend Realtime membership removal remains the
 permission authority. Account switching still requires resetPlayerSession or
 widget teardown, as documented above. Public leaveClan is a low-level HTTP call;
 the mounted panel action owns the UI transition and emits clan-sdk:left {clanId}.
-
-Verification and changed files: [TEAM-214 report](TEAM-214.md).
 
 ## Closed clans: ask to join, leaders answer
 
@@ -738,8 +729,6 @@ The member panel's Add friend / Cancel use the Friends API (`sendFriendRequest`,
 enabled) so each member shows its real relation; a member who already sent a
 request is accepted by sending one back, per Social.
 
-Verification and changed files: [TEAM-257 report](TEAM-257.md).
-
 ## Realtime clan chat (TEAM-226)
 
 The SDK reuses the same authenticated Realtime connection for DMs and clan chat.
@@ -766,4 +755,3 @@ chat.enabled and chat.clanChat. Backend CORS must allow the exact game origin
 (e.g. http://localhost:5173); host CSP must allow HTTP/S and WS/S connections.
 No game-side chat transport/state or secret API key is needed in the browser.
 
-Current results and live blockers: [TEAM-226 report](TEAM-226.md).
