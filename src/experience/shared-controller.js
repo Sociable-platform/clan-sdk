@@ -4,8 +4,11 @@ import {socialClanAdapter,memberRoleAdapter,joinRequestsAdapter} from '../social
 // Runtime state and confirmed HTTP actions only; @clan/ui owns the visual tree.
 // How long a change in the clan's members waits before the clan is read again, so a burst of joins shares one read.
 const ROSTER_DELAY_MS = 500;
+// Social keeps a game's config for up to 30 s (SOCIAL_CONFIG_CACHE_TTL), so right after a publish it may still answer
+// by the old roles. The join requests are read again once this long after a config change.
+const CONFIG_SETTLE_MS = 35000;
 
-export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen, rosterDelay = ROSTER_DELAY_MS}) {
+export function createExperienceController({sdk, onChange, onEvent, clanAdapter, enabled = true, resolveScreen = screen => screen, rosterDelay = ROSTER_DELAY_MS, configSettle = CONFIG_SETTLE_MS}) {
   let dead = false;
   let revision = 0;
   let visit = 0;
@@ -17,7 +20,10 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
   // Closed clans: the requests to join the player's clan, for the leaders who decide on them. They are read for a closed
   // clan only. Social answers 403 to a member whose role may not decide; that is remembered for the clan and role, so such a
   // member is not asked again (a role change is a new key). A request is accepted or declined once, one at a time.
+  // TEAM-302: which roles decide is the game's choice (canHandleRequests), so a refusal is forgotten when the config
+  // changes, and when Social tells the player about a new request (it only tells those who may decide).
   let requests=[],requestsDenied=null,requestsReading=false,requestsAgain=false,requestPending=null,requestError='';
+  let settleTimer=null;
   const clearRequests=()=>{requests=[];requestsDenied=null;requestPending=null;requestError='';};
   const emit = () => {
     if (dead) return;
@@ -237,7 +243,15 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     cancelJoinRequest(id) { if (!state.profilePending && state.membershipKnown && !state.clan) void list.cancelRequest(id); },
     // Realtime: somebody asked to join the player's clan (read the requests again), or the player's own request was declined
     // (the clan list is read again, which clears the mark).
-    requestsChanged(clanId) { if (!dead && enabled && state.clan?.id === clanId) void readRequests(); },
+    requestsChanged(clanId) { if (!dead && enabled && state.clan?.id === clanId) {requestsDenied=null;void readRequests();} },
+    // A published config may change which roles decide on join requests: ask again now, and once more when Social's
+    // cached copy of the old config has run out.
+    configChanged() {
+      if(dead||!enabled||!state.clan)return;
+      requestsDenied=null;void readRequests();
+      clearTimeout(settleTimer);
+      settleTimer=setTimeout(()=>{settleTimer=null;requestsDenied=null;void readRequests();},configSettle);
+    },
     joinRequestDeclined(clanId) {
       if (dead || !enabled || state.clan) return;
       onEvent('join-declined',{clanId});
@@ -313,6 +327,6 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
       state = {...state, status:'idle', profilePending:false, membershipKnown:false,leavePending:false,leaveError:'',memberPending:null,memberError:''}; emit();
       if (value) void membership();
     },
-    destroy() { dead = true; revision++; visit++; clearTimeout(rosterTimer); rosterTimer = null; rosterWaiting = false; list.destroy(); },
+    destroy() { dead = true; revision++; visit++; clearTimeout(rosterTimer); rosterTimer = null; rosterWaiting = false; clearTimeout(settleTimer); settleTimer = null; list.destroy(); },
   };
 }

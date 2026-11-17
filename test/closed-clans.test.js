@@ -170,7 +170,7 @@ test('a clan already marked as requested in the list is not asked again',async t
 
 const asked=[{id:'r1',playerId:'p1',displayName:'Rashad',createdAt:'2026-11-17T09:12:00Z'},{id:'r2',playerId:'p2',displayName:'Leyla',createdAt:'2026-11-17T09:13:00Z'}];
 
-async function leader(t,{role='owner',policy='closed',overrides={}}={}) {
+async function leader(t,{role='owner',policy='closed',overrides={},configSettle}={}) {
   const states=[],events=[],calls=[];
   let requests=[...asked];
   const sdk={
@@ -181,7 +181,7 @@ async function leader(t,{role='owner',policy='closed',overrides={}}={}) {
     declineClanJoinRequest:async(c,r)=>{calls.push(['decline',c,r]);requests=requests.filter(x=>x.id!==r);},
     setClanJoinPolicy:async(c,p)=>{calls.push(['policy',c,p]);return {id:c,name:'Wolves',memberCount:3,maxMembers:10,joinPolicy:p};},
     ...overrides};
-  const c=createExperienceController({sdk,onChange:s=>states.push(s),onEvent:(...e)=>events.push(e),clanAdapter:r=>r.clans,rosterDelay:0});
+  const c=createExperienceController({sdk,onChange:s=>states.push(s),onEvent:(...e)=>events.push(e),clanAdapter:r=>r.clans,rosterDelay:0,configSettle});
   t.after(()=>c.destroy());
   await c.start();await settle();
   return {c,calls,events,sdk,state:()=>states.at(-1),setRequests:list=>{requests=list;}};
@@ -199,12 +199,62 @@ test('an open clan has no requests to read',async t=>{
   assert.equal(f.calls.some(c=>c[0]==='list'),false);
 });
 
-test('a member whose role may not decide is turned away once, and not asked again',async t=>{
-  const f=await leader(t,{role:'member',overrides:{listClanJoinRequests:async()=>{throw apiError(403,'not_allowed','Your clan role does not allow this');}}});
+// A Social that refuses the list until `allow()` is called, as it does for a role that may not decide.
+const refusing=()=>{
+  let allowed=false,lists=0;
+  return {allow:()=>{allowed=true;},lists:()=>lists,overrides:{listClanJoinRequests:async()=>{lists++;if(!allowed)throw apiError(403,'not_allowed','Your clan role does not allow this');return {requests:asked};}}};
+};
+
+test('a member whose role may not decide is turned away once, and a roster change does not ask again',async t=>{
+  const social=refusing(),f=await leader(t,{role:'member',overrides:social.overrides});
   assert.deepEqual(f.state().joinRequests,[]);
-  // A notice, a roster change and the like read again: the answer is remembered for this clan and role.
-  f.c.requestsChanged('clan-id');f.c.rosterChanged('clan-id');await settle();
+  f.c.rosterChanged('clan-id');await tick();await settle();
+  assert.equal(social.lists(),1,'the answer is remembered for this clan and role');
   assert.deepEqual(f.state().joinRequests,[]);
+});
+
+// TEAM-302: which roles decide is the game's choice (canHandleRequests in its config), so a refusal does not last forever.
+test('Social telling the player about a new request asks again: it only tells those who may decide',async t=>{
+  const social=refusing(),f=await leader(t,{role:'elder',overrides:social.overrides});
+  social.allow();
+  f.c.requestsChanged('clan-id');await settle();
+  assert.equal(social.lists(),2);
+  assert.deepEqual(f.state().joinRequests.map(r=>r.name),['Rashad','Leyla']);
+});
+
+test('a published config that lets the player\'s role decide shows the requests without a reload',async t=>{
+  const social=refusing(),f=await leader(t,{role:'elder',overrides:social.overrides,configSettle:20});
+  social.allow();
+  f.c.configChanged();await settle();
+  assert.deepEqual(f.state().joinRequests.map(r=>r.name),['Rashad','Leyla']);
+});
+
+test('while Social still answers by the old config, the requests are read again once it has caught up',async t=>{
+  const social=refusing(),f=await leader(t,{role:'elder',overrides:social.overrides,configSettle:20});
+  f.c.configChanged();await settle();
+  assert.equal(social.lists(),2,'asked at once');
+  assert.deepEqual(f.state().joinRequests,[]);
+  social.allow();await new Promise(done=>setTimeout(done,40));await settle();
+  assert.equal(social.lists(),3,'and once more after the settle time');
+  assert.deepEqual(f.state().joinRequests.map(r=>r.name),['Rashad','Leyla']);
+});
+
+test('a published config that takes the power away clears the list the player had',async t=>{
+  let allowed=true;
+  const f=await leader(t,{role:'co-leader',configSettle:20,overrides:{listClanJoinRequests:async()=>{if(!allowed)throw apiError(403,'not_allowed','Your clan role does not allow this');return {requests:asked};}}});
+  assert.equal(f.state().joinRequests.length,2);
+  allowed=false;f.c.configChanged();await settle();
+  assert.deepEqual(f.state().joinRequests,[]);
+});
+
+test('a config change reads nothing for an open clan, and nothing after the panel is closed',async t=>{
+  const open=await leader(t,{policy:'open',configSettle:5});
+  open.c.configChanged();await new Promise(done=>setTimeout(done,20));await settle();
+  assert.equal(open.calls.some(c=>c[0]==='list'),false);
+  const closed=await leader(t,{configSettle:5}),before=closed.calls.filter(c=>c[0]==='list').length;
+  closed.c.configChanged();await settle();closed.c.destroy();
+  await new Promise(done=>setTimeout(done,20));await settle();
+  assert.equal(closed.calls.filter(c=>c[0]==='list').length,before+1,'only the read at once, not the one after the settle time');
 });
 
 test('Realtime says somebody asked: the requests are read again, and only for the player\'s own clan',async t=>{

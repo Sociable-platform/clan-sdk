@@ -117,7 +117,7 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
       if(destroyed)throw new Error('Cannot update a destroyed SDK widget.');
       const candidate=widgetConfig(next,{validate});renderer.update(candidate,data());current=candidate;
       if(live){
-        controller.setEnabled(current.clan?.enabled===true);controller.reconcile();
+        controller.setEnabled(current.clan?.enabled===true);controller.reconcile();controller.configChanged();
         if(state?.tab==='friends'&&current.friends?.enabled!==true||state?.tab==='clan'&&current.clan?.enabled!==true||state?.tab==='chat'&&current.chat?.enabled!==true)controller.tab(defaultTab());
         friends.setView(current.friends?.enabled===true,friendsActive());
         chat.configure(current,state?.clan?.id);
