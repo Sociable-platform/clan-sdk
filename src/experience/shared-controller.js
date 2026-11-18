@@ -1,4 +1,5 @@
 import {createDiscoverController} from './discover-controller.js';
+import {isSuspendedError} from '../social/errors.js';
 import {socialClanAdapter,memberRoleAdapter,joinRequestsAdapter} from '../social/clan-adapter.js';
 
 // Runtime state and confirmed HTTP actions only; @clan/ui owns the visual tree.
@@ -32,7 +33,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     if (rosterWaiting && !state.profilePending) { rosterWaiting = false; rosterTimer ??= setTimeout(readRoster, rosterDelay); }
   };
   const fail = error => {
-    state = {...state, error:error?.message || 'Social request failed.', profilePending:false};
+    state = {...state, error:error?.message || 'Social request failed.', profilePending:false, suspended:isSuspendedError(error)};
     emit();
   };
   // Only list after membership is known; enabling a tab cannot bypass auth state.
@@ -49,7 +50,7 @@ export function createExperienceController({sdk, onChange, onEvent, clanAdapter,
     const generation=membershipGeneration;
     const ticket = ++revision;
     const currentVisit = visit;
-    state = {...state, profilePending:true, error:''}; emit();
+    state = {...state, profilePending:true, error:'', suspended:false}; emit();
     try {
       const result = await sdk.myClan();
       if (dead || !enabled || ticket !== revision || generation!==membershipGeneration) return;
