@@ -26,7 +26,8 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     if(status){
       const empty=!status.textContent.trim()&&!status.querySelector('button');
       // Out of flow, not display:none, so the polite live region stays announced.
-      const style=empty?'position:absolute;top:0;left:0;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap':'';
+      // Shown, it is one row: the message, then Retry beside it (or under it when the line is long).
+      const style=empty?'position:absolute;top:0;left:0;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap':'display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px';
       if(status.style.cssText!==style)status.style.cssText=style;
     }
     const next=shadow.querySelector('[data-key="chat"]');
@@ -84,6 +85,8 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       const retry = doc.createElement('button');
       retry.type = 'button';
       retry.textContent = 'Retry';
+      // The widget's own primary button, in the game's brand colour: Retry is the one thing to press here.
+      retry.className = 'sk-btn';
       retry.dataset.sdkRetry = '';
       status.append(retry);
     } else if (!canRetry) status?.querySelector('[data-sdk-retry]')?.remove();

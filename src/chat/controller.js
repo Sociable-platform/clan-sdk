@@ -161,7 +161,7 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
       const acquired=await client.acquire(forceNext,rejectedVersion);forceNext=false;if(!valid(ticket))return;
       rejectedVersion=acquired.version;
       const ws=socketFactory(client.socketUrl(acquired.token));socket=ws;
-      helloTimer=setTimeout(()=>{if(valid(ticket)){state={...state,error:'Realtime did not complete authentication.'};try{ws.close();}catch{};}},handshakeTimeout);
+      helloTimer=setTimeout(()=>{if(valid(ticket)){state={...state,error:'Could not sign in to chat. Try again.'};try{ws.close();}catch{};}},handshakeTimeout);
       ws.onopen=()=>{}; // A socket open is not authentication or a conversation.
       ws.onerror=()=>{}; // Browser error/URL may contain credentials; never log/forward it.
       ws.onclose=event=>{
@@ -252,9 +252,9 @@ export function createChatController({client,onChange,onNotification=()=>{},onRe
             else if(['friend_request','friend_request_cancelled','friend_request_declined','friend_accepted'].includes(d.kind))onNotification(d);
           }
           else if(frame.type==='config.updated')onConfig(d);
-        }catch{state={...state,error:'Invalid Realtime frame.'};emit();}
+        }catch{state={...state,error:'Chat hit a problem. Try again.'};emit();}
       };
-    }catch{if(valid(ticket)){state={...state,error:'Unable to connect to Realtime.'};retry(1006,false);}}
+    }catch{if(valid(ticket)){state={...state,error:'Chat is offline. Check your connection and try again.'};retry(1006,false);}}
   }
   return {
     // The player removed this friend: the DM stays, read-only (Realtime's conversation.updated follows; TEAM-284).
