@@ -568,6 +568,12 @@ each HTTP operation still has at most two attempts and retains method/body.
 Token callback failures do not send unauthenticated requests. Session reset drops
 pending acquisition references and rejects previous-session responses/callbacks.
 
+A suspended game is not served. When Social answers 403 `game_suspended`, or `getPlayerToken`
+rejects with an error whose `code` is `game_suspended` (a game backend should pass Platform's
+403 on that way), the widget shows the error message, offers no Retry, and turns search and
+"Create a clan" off, because nothing the player does can fix it. Any other token failure keeps
+Retry.
+
 Expiry caching belongs to the game. Harvest Village now keeps its token only in
 browser memory, using the game backend's `expiresIn` (seconds) / `expiresAt`
 (epoch milliseconds). On the next use within30seconds of expiry (or10% for short

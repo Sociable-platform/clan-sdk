@@ -1,3 +1,4 @@
+import {isSuspendedError} from '../social/errors.js';
 import {friendPlayer,friendList,friendRequests,playerResults,blockedPlayers} from '../social/friends-adapter.js';
 
 // clanPlayers: Social IDs of the confirmed clan roster, whose Members panel offers Add friend.
@@ -27,7 +28,7 @@ export function createFriendsController({sdk,onChange,onMutation=()=>{},clanPlay
     // its acknowledgement with a pre-mutation snapshot.
     if(mutation){refreshQueued=true;backgroundQueued ||= background;return;}
     invalidate();const ticket=revision;
-    state={...state,status:'loading',error:'',pending:null,searchError:'',...(preserveActionError?{}:{actionError:''})};emit();
+    state={...state,status:'loading',error:'',suspended:false,pending:null,searchError:'',...(preserveActionError?{}:{actionError:''})};emit();
     try {
       const player=friendPlayer(await sdk.getMyPlayer());
       if(!valid(ticket,background))return;
@@ -38,7 +39,7 @@ export function createFriendsController({sdk,onChange,onMutation=()=>{},clanPlay
       if(!valid(ticket,background))return;
       state={...state,player,friends:friendList(friends),blocked:blockedPlayers(blocks),...friendRequests(requests),status:'ready'};emit();
       if(active&&state.query.trim())await searchNow();
-    }catch(error){if(!valid(ticket,background))return;state={...state,status:'error',error:error.message};emit();}
+    }catch(error){if(!valid(ticket,background))return;state={...state,status:'error',error:error.message,suspended:isSuspendedError(error)};emit();}
   }
   return {
     setView(nextEnabled,nextActive) {

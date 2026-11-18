@@ -64,7 +64,9 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     else if (data.screen === 'discover' && state.status === 'empty') message ||= 'No clans found.';
     if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : '';
     const chatVisible=data.tab==='chat'||data.tab==='clan'&&data.screen==='home';
-    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error');
+    // A suspended game is not served: say so and turn the controls off, because Retry and Create cannot work.
+    const suspended = data.tab === 'friends' ? Boolean(state.friends?.suspended) : Boolean(state.suspended);
+    const canRetry = !suspended && (data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error'));
     // Do not leave an empty flex row/gap after the Blocked section. Create the
     // status only when needed, so the mutation observer cannot append/remove it
     // repeatedly. Other screens retain their chat/status decoration hooks.
@@ -88,6 +90,13 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       status.append(retry);
     } else if (!canRetry) status?.querySelector('[data-sdk-retry]')?.remove();
 
+    if (suspended) {
+      const why = 'Social is turned off for this game';
+      shadow.querySelectorAll('[data-key="search"], [data-key="player-search"], .sk-search-row button').forEach(control => {
+        control.disabled = true;
+        control.title = why;
+      });
+    }
     shadow.querySelectorAll('.sk-composer button').forEach(button => {
       button.disabled = true;
       button.title = 'Messaging unavailable';
