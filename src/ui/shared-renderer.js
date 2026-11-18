@@ -85,8 +85,8 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       const retry = doc.createElement('button');
       retry.type = 'button';
       retry.textContent = 'Retry';
-      // The widget's own secondary button, so it follows the game's theme like every other button.
-      retry.className = 'sk-btn sk-btn-ghost';
+      // The widget's own primary button, in the game's brand colour: Retry is the one thing to press here.
+      retry.className = 'sk-btn';
       retry.dataset.sdkRetry = '';
       status.append(retry);
     } else if (!canRetry) status?.querySelector('[data-sdk-retry]')?.remove();
