@@ -159,7 +159,7 @@ These checks use the actual nginx image; they do not contact Clan backends.
 
 | Paths (current release) | Successful response headers |
 | --- | --- |
-| `/0.1.1/clan-sdk.js`, `/0.1.1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/0.1.2/clan-sdk.js`, `/0.1.2/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
 | `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
 
 The exact version is read from `package.json` at build time. `/v1/` is the agreed
@@ -567,6 +567,12 @@ Requests whose old401 arrives after that refresh finishes reuse its result;
 each HTTP operation still has at most two attempts and retains method/body.
 Token callback failures do not send unauthenticated requests. Session reset drops
 pending acquisition references and rejects previous-session responses/callbacks.
+
+A suspended game is not served. When Social answers 403 `game_suspended`, or `getPlayerToken`
+rejects with an error whose `code` is `game_suspended` (a game backend should pass Platform's
+403 on that way), the widget shows the error message, offers no Retry, and turns search and
+"Create a clan" off, because nothing the player does can fix it. Any other token failure keeps
+Retry.
 
 Expiry caching belongs to the game. Harvest Village now keeps its token only in
 browser memory, using the game backend's `expiresIn` (seconds) / `expiresAt`

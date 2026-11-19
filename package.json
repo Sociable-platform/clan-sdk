@@ -1,6 +1,6 @@
 {
   "name": "clan-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Plain JavaScript Social client for the clan widget SDK",
   "type": "module",

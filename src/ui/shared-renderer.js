@@ -65,7 +65,9 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
     else if (data.screen === 'discover' && state.status === 'empty') message ||= 'No clans found.';
     if (data.tab !== 'friends' && data.screen === 'create') message ||= state.createPending ? 'Creating clan…' : '';
     const chatVisible=data.tab==='chat'||data.tab==='clan'&&data.screen==='home';
-    const canRetry = data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error');
+    // A suspended game is not served: say so and turn the controls off, because Retry and Create cannot work.
+    const suspended = data.tab === 'friends' ? Boolean(state.friends?.suspended) : Boolean(state.suspended);
+    const canRetry = !suspended && (data.tab==='friends'?Boolean(state.friends?.error||state.friends?.searchError):chatVisible?Boolean(state.chat?.error):Boolean(state.error || state.status === 'error'));
     // Do not leave an empty flex row/gap after the Blocked section. Create the
     // status only when needed, so the mutation observer cannot append/remove it
     // repeatedly. Other screens retain their chat/status decoration hooks.
@@ -91,6 +93,13 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
       status.append(retry);
     } else if (!canRetry) status?.querySelector('[data-sdk-retry]')?.remove();
 
+    if (suspended) {
+      const why = 'Social is turned off for this game';
+      shadow.querySelectorAll('[data-key="search"], [data-key="player-search"], .sk-search-row button').forEach(control => {
+        control.disabled = true;
+        control.title = why;
+      });
+    }
     shadow.querySelectorAll('.sk-composer button').forEach(button => {
       button.disabled = true;
       button.title = 'Messaging unavailable';
@@ -116,14 +125,20 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         if (!clan) return;
         const count = clan.memberCount === undefined ? '' : clan.maxMembers === undefined
           ? `${clan.memberCount} members` : `${clan.memberCount}/${clan.maxMembers} members`;
-        setText(row.querySelector('.sk-small'), count);
+        // A closed clan takes a request: keep the panel's "· Closed" and its Request / Requested button (a click on
+        // Requested takes the request back, so it stays on while the player has no clan and nothing is pending).
+        const closed = clan.joinPolicy === 'closed';
+        const requested = closed && clan.requested === true && !data.clan;
+        setText(row.querySelector('.sk-small'), closed && count ? `${count} · Closed` : count);
         const full = clan.maxMembers !== undefined && clan.memberCount >= clan.maxMembers;
         const button = row.querySelector('button');
         if (button) {
-          button.disabled = Boolean(full || clan.canJoin === false || data.clan || state.pendingJoin
-            || state.joinedClanId || state.profilePending || state.status !== 'ready');
-          setText(button, state.pendingJoin === clan.id ? 'Joining…'
-            : data.clan?.id === clan.id || state.joinedClanId === clan.id ? 'Joined' : full ? labels.full : labels.join);
+          const busy = Boolean(state.pendingJoin || state.profilePending || state.status !== 'ready');
+          button.disabled = requested ? busy
+            : Boolean(full || clan.canJoin === false || data.clan || busy || state.joinedClanId);
+          setText(button, state.pendingJoin === clan.id ? (closed ? (requested ? 'Taking back…' : 'Sending…') : 'Joining…')
+            : data.clan?.id === clan.id || state.joinedClanId === clan.id ? 'Joined'
+              : requested ? 'Requested' : full ? labels.full : closed ? 'Request' : labels.join);
         }
         // Only a saved backend badge is a clan's selected badge.
         const badge = row.querySelector('.sk-badge');

@@ -1,3 +1,5 @@
+import { isSuspendedError } from '../social/errors.js';
+
 // No DOM or wire DTO assumptions here. The mount supplies the confirmed Social
 // adapter by default; explicitly supplied adapters can support other data sources.
 export function clanViewModels(value) {
@@ -55,7 +57,7 @@ export function createDiscoverController({ listClans, joinClan, requestJoin, can
     if (dead || !enabled || state.screen !== 'discover') return;
     invalidate();
     const ticket = revision;
-    state = { ...state, status: 'loading', error: '' };
+    state = { ...state, status: 'loading', error: '', suspended: false };
     emit();
     try {
       const raw = await listClans(state.query ? { q: state.query } : {});
@@ -64,7 +66,7 @@ export function createDiscoverController({ listClans, joinClan, requestJoin, can
       state = { ...state, clans, status: clans.length ? 'ready' : 'empty' };
     } catch (error) {
       if (dead || ticket !== revision) return;
-      state = { ...state, status: 'error', error: error?.message || 'Could not load clans.' };
+      state = { ...state, status: 'error', error: error?.message || 'Could not load clans.', suspended: isSuspendedError(error) };
     }
     emit();
   }
