@@ -62,7 +62,9 @@ export function mountExperience(sdk,{container,config,clanAdapter=socialClanAdap
     return {player:friendState?.player??{id:chatState?.playerId,name:self?.name??'Player'},clan:state?.clan??null,role:state?.role,clans:state?.clans??[],members:roster.map(relation),messages:view.messages,
       // Closed clans: the players who asked to join the player's clan (only a leader gets any), what is being answered, and the last error.
       clanRequests:state?.joinRequests??[],clanRequestPending:state?.requestPending??null,clanRequestError:state?.requestError??'',
-      friends:friendList(),blocked:friendState?.blocked??[],requests:searching?[]:[...(friendState?.incoming??[]),...(friendState?.outgoing??[])],threads:view.threads,assets,
+      // requests: only those sent to the player (the panel badges them and offers Accept and Decline). One the player
+      // sent waits for the other player, and shows as Cancel on that player (search, Members).
+      friends:friendList(),blocked:friendState?.blocked??[],requests:searching?[]:friendState?.incoming??[],threads:view.threads,assets,
       unread:view.unread,
       screen:state?.screen??'discover',tab:state?.tab??'clan',sdkState:{...state,friends:friendState,chat:chatState},chatRooms:view.rooms,chatKeys:view.keys,
       actions:{screenChanged:screen=>clanActions.navigate(screen),tabChanged:tab=>clanActions.tab(tab),join:id=>clanActions.join(id),create:value=>clanActions.create(value),leave:()=>clanActions.leave(),acceptRequest:id=>friendActions.action('accept',id),removeFriend:id=>friendActions.action('remove',id),blockFriend:id=>friendActions.action('block',id),unblock:id=>friendActions.action('unblock',id),
