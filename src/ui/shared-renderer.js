@@ -125,14 +125,20 @@ export function createSharedRenderer(container, {onSearch = () => {}, onRetry = 
         if (!clan) return;
         const count = clan.memberCount === undefined ? '' : clan.maxMembers === undefined
           ? `${clan.memberCount} members` : `${clan.memberCount}/${clan.maxMembers} members`;
-        setText(row.querySelector('.sk-small'), count);
+        // A closed clan takes a request: keep the panel's "· Closed" and its Request / Requested button (a click on
+        // Requested takes the request back, so it stays on while the player has no clan and nothing is pending).
+        const closed = clan.joinPolicy === 'closed';
+        const requested = closed && clan.requested === true && !data.clan;
+        setText(row.querySelector('.sk-small'), closed && count ? `${count} · Closed` : count);
         const full = clan.maxMembers !== undefined && clan.memberCount >= clan.maxMembers;
         const button = row.querySelector('button');
         if (button) {
-          button.disabled = Boolean(full || clan.canJoin === false || data.clan || state.pendingJoin
-            || state.joinedClanId || state.profilePending || state.status !== 'ready');
-          setText(button, state.pendingJoin === clan.id ? 'Joining…'
-            : data.clan?.id === clan.id || state.joinedClanId === clan.id ? 'Joined' : full ? labels.full : labels.join);
+          const busy = Boolean(state.pendingJoin || state.profilePending || state.status !== 'ready');
+          button.disabled = requested ? busy
+            : Boolean(full || clan.canJoin === false || data.clan || busy || state.joinedClanId);
+          setText(button, state.pendingJoin === clan.id ? (closed ? (requested ? 'Taking back…' : 'Sending…') : 'Joining…')
+            : data.clan?.id === clan.id || state.joinedClanId === clan.id ? 'Joined'
+              : requested ? 'Requested' : full ? labels.full : closed ? 'Request' : labels.join);
         }
         // Only a saved backend badge is a clan's selected badge.
         const badge = row.querySelector('.sk-badge');
