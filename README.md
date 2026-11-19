@@ -159,7 +159,7 @@ These checks use the actual nginx image; they do not contact Clan backends.
 
 | Paths (current release) | Successful response headers |
 | --- | --- |
-| `/0.1.1/clan-sdk.js`, `/0.1.1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
+| `/0.1.2/clan-sdk.js`, `/0.1.2/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` |
 | `/v1/clan-sdk.js`, `/v1/clan-sdk.esm.js` | `Content-Type: application/javascript`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` |
 
 The exact version is read from `package.json` at build time. `/v1/` is the agreed
